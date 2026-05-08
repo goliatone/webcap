@@ -1,0 +1,64 @@
+version: 2
+
+project_name: webcap
+before:
+  hooks:
+    - go mod download
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      # - windows
+    goarch:
+      - 386
+      - amd64
+      - arm
+      - arm64
+    ignore:
+      - goos: darwin
+        goarch: 386
+      - goos: darwin
+        goarch: arm
+    main: "./cmd/webcap"
+    binary: "webcap"
+    ldflags:
+      - -s -w
+archives:
+  - name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ if eq .Arch "amd64" }}x86_64{{ else if eq .Arch "386" }}i386{{ else }}{{ .Arch }}{{ end }}{{ with .Arm }}v{{ . }}{{ end }}'
+checksum:
+  name_template: "checksums.txt"
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^Update README"
+      - "merge fix"
+brews:
+  - name: webcap
+    repository:
+      owner: goliatone
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    description: Browser screenshot, image diff, workflow report, and MCP CLI.
+    homepage: https://github.com/goliatone/webcap
+    license: "MIT"
+    test: |
+      assert_predicate bin/"webcap", :exist?
+nfpms:
+  - id: webcap
+    file_name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ if eq .Arch "amd64" }}x86_64{{ else if eq .Arch "386" }}i386{{ else }}{{ .Arch }}{{ end }}{{ with .Arm }}v{{ . }}{{ end }}'
+    bindir: /usr/local/bin/
+    maintainer: goliatone <webcap@goliat.one>
+    description: Browser screenshot, image diff, workflow report, and MCP CLI.
+    homepage: https://github.com/goliatone/webcap
+    license: "MIT"
+    formats:
+      - deb
+      - rpm

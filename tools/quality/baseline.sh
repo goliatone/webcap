@@ -26,7 +26,7 @@ shift 3
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/../.." && pwd)"
-tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/go-auth-quality.XXXXXX")"
+tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/webcap-quality.XXXXXX")"
 
 cleanup() {
     rm -rf "${tmp_dir}"
@@ -52,6 +52,7 @@ normalize_output() {
     sed "s#${repo_root}/##g" \
         | sed 's#^\./##' \
         | sed 's/^[[:space:]]*//' \
+        | sed '/^0 issues\.$/d' \
         | awk 'NF' \
         | sort -u
 }
@@ -84,13 +85,12 @@ resolved_findings="${tmp_dir}/resolved.txt"
 
 case "${command_name}" in
     check)
-        if [ ! -f "${baseline_file}" ]; then
-            echo "baseline file not found: ${baseline_file}" >&2
-            exit 1
-        fi
-
         collect_findings "${current_raw}" "${current_normalized}" "$@"
-        awk 'NF && $1 !~ /^#/' "${baseline_file}" | sort -u >"${baseline_normalized}"
+        if [ -f "${baseline_file}" ]; then
+            awk 'NF && $1 !~ /^#/' "${baseline_file}" | sort -u >"${baseline_normalized}"
+        else
+            : >"${baseline_normalized}"
+        fi
         comm -23 "${current_normalized}" "${baseline_normalized}" >"${new_findings}"
         comm -13 "${current_normalized}" "${baseline_normalized}" >"${resolved_findings}"
 

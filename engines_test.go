@@ -55,8 +55,8 @@ func TestPlaywrightEngineCaptureBridge(t *testing.T) {
   warnings: [],
   bytes_base64: Buffer.from("png").toString("base64")
 }));`
-	if err := os.WriteFile(scriptPath, []byte(script), 0o644); err != nil {
-		t.Fatalf("WriteFile returned error: %v", err)
+	if writeErr := os.WriteFile(scriptPath, []byte(script), 0o644); writeErr != nil {
+		t.Fatalf("WriteFile returned error: %v", writeErr)
 	}
 
 	engine, err := NewPlaywrightEngine(PlaywrightOptions{

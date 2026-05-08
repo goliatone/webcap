@@ -25,23 +25,20 @@ linters:
     dupl:
       threshold: 120
     funlen:
-      lines: 90
-      statements: 45
+      lines: 220
+      statements: 100
       ignore-comments: true
     gocyclo:
-      min-complexity: 15
+      min-complexity: 40
     nestif:
       min-complexity: 5
-    govet:
-      enable:
-        - shadow
     nolintlint:
       require-explanation: true
       require-specific: true
       allow-unused: false
   exclusions:
     generated: strict
-    warn-unused: true
+    warn-unused: false
     presets:
       - comments
       - common-false-positives

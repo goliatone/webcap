@@ -279,8 +279,8 @@ func TestGenerateWorkflowReportWritesArtifacts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal capture metadata: %v", err)
 	}
-	if err := os.WriteFile(currentPath+".json", append(encoded, '\n'), 0o644); err != nil {
-		t.Fatalf("write capture metadata: %v", err)
+	if writeErr := os.WriteFile(currentPath+".json", append(encoded, '\n'), 0o644); writeErr != nil {
+		t.Fatalf("write capture metadata: %v", writeErr)
 	}
 
 	scenario := WorkflowScenario{
@@ -351,26 +351,26 @@ func TestGenerateWorkflowReportWritesArtifacts(t *testing.T) {
 	if result.Status.Level != workflowStatusWarning {
 		t.Fatalf("expected warning report status, got %+v", result.Status)
 	}
-	if _, err := os.Stat(result.ReportPath); err != nil {
-		t.Fatalf("expected html report: %v", err)
+	if _, statErr := os.Stat(result.ReportPath); statErr != nil {
+		t.Fatalf("expected html report: %v", statErr)
 	}
-	if _, err := os.Stat(result.MetadataPath); err != nil {
-		t.Fatalf("expected report metadata: %v", err)
+	if _, statErr := os.Stat(result.MetadataPath); statErr != nil {
+		t.Fatalf("expected report metadata: %v", statErr)
 	}
-	if _, err := os.Stat(filepath.Join(scenario.Artifacts.ReportDir, "styles.css")); err != nil {
-		t.Fatalf("expected report stylesheet: %v", err)
+	if _, statErr := os.Stat(filepath.Join(scenario.Artifacts.ReportDir, "styles.css")); statErr != nil {
+		t.Fatalf("expected report stylesheet: %v", statErr)
 	}
-	if _, err := os.Stat(filepath.Join(scenario.Artifacts.ReportDir, "assets", "current", "patient.png")); err != nil {
-		t.Fatalf("expected staged current image asset: %v", err)
+	if _, statErr := os.Stat(filepath.Join(scenario.Artifacts.ReportDir, "assets", "current", "patient.png")); statErr != nil {
+		t.Fatalf("expected staged current image asset: %v", statErr)
 	}
-	if _, err := os.Stat(filepath.Join(scenario.Artifacts.ReportDir, "assets", "reference", filepath.Base(referencePath))); err != nil {
-		t.Fatalf("expected staged reference image asset: %v", err)
+	if _, statErr := os.Stat(filepath.Join(scenario.Artifacts.ReportDir, "assets", "reference", filepath.Base(referencePath))); statErr != nil {
+		t.Fatalf("expected staged reference image asset: %v", statErr)
 	}
-	if _, err := os.Stat(filepath.Join(scenario.Artifacts.ReportDir, "assets", "diff", "patient.png")); err != nil {
-		t.Fatalf("expected staged diff image asset: %v", err)
+	if _, statErr := os.Stat(filepath.Join(scenario.Artifacts.ReportDir, "assets", "diff", "patient.png")); statErr != nil {
+		t.Fatalf("expected staged diff image asset: %v", statErr)
 	}
-	if _, err := os.Stat(result.Entries[0].DiffImagePath); err != nil {
-		t.Fatalf("expected diff image: %v", err)
+	if _, statErr := os.Stat(result.Entries[0].DiffImagePath); statErr != nil {
+		t.Fatalf("expected diff image: %v", statErr)
 	}
 
 	reportHTML, err := os.ReadFile(result.ReportPath)

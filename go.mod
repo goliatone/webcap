@@ -1,6 +1,6 @@
 module github.com/goliatone/webcap
 
-go 1.26.1
+go 1.26.3
 
 require (
 	github.com/chromedp/cdproto v0.0.0-20250803210736-d308e07a266d

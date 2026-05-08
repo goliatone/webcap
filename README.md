@@ -17,6 +17,7 @@ go run ./cmd/webcap shot http://localhost:3000 --full-page --output shots/home.p
 ## CLI
 
 ```bash
+webcap help
 webcap shot http://localhost:3000 --full-page --output shots/home.png
 webcap multi ./shots.yaml --output-dir ./shots
 webcap diff ./baseline.png ./current.png --output ./diff.png

@@ -151,6 +151,9 @@ func writeTestPNG(path string, pixels []color.NRGBA) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
-	return png.Encode(file, img)
+	if err := png.Encode(file, img); err != nil {
+		_ = file.Close()
+		return err
+	}
+	return file.Close()
 }

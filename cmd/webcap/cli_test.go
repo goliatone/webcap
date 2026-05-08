@@ -66,6 +66,38 @@ func TestParseDiffCLI(t *testing.T) {
 	}
 }
 
+func TestParseHelpCLI(t *testing.T) {
+	invocation, err := parseCLI([]string{"help"})
+	if err != nil {
+		t.Fatalf("parseCLI returned error: %v", err)
+	}
+	if invocation.Command != "help" {
+		t.Fatalf("unexpected command: %s", invocation.Command)
+	}
+}
+
+func TestParseVersionCLI(t *testing.T) {
+	invocation, err := parseCLI([]string{"version"})
+	if err != nil {
+		t.Fatalf("parseCLI returned error: %v", err)
+	}
+	if invocation.Command != "version" {
+		t.Fatalf("unexpected command: %s", invocation.Command)
+	}
+}
+
+func TestParseVersionCLIRejectsArguments(t *testing.T) {
+	if _, err := parseCLI([]string{"version", "extra"}); err == nil {
+		t.Fatal("expected version arguments to be rejected")
+	}
+}
+
+func TestParseHelpCLIRejectsArguments(t *testing.T) {
+	if _, err := parseCLI([]string{"help", "shot"}); err == nil {
+		t.Fatal("expected help arguments to be rejected")
+	}
+}
+
 func TestParseShotCLIWithDeterministicFlags(t *testing.T) {
 	invocation, err := parseCLI([]string{
 		"shot",

@@ -66,10 +66,14 @@ type mcpOptions struct {
 
 func parseCLI(args []string) (cliInvocation, error) {
 	if len(args) == 0 {
-		return cliInvocation{}, errors.New("expected subcommand: shot, multi, diff, workflow, report, or mcp")
+		return cliInvocation{}, errors.New("expected subcommand: help, version, shot, multi, diff, workflow, report, or mcp")
 	}
 
 	switch strings.TrimSpace(args[0]) {
+	case "help":
+		return parseHelpCLI(args[1:])
+	case "version":
+		return parseVersionCLI(args[1:])
 	case "shot":
 		return parseShotCLI(args[1:])
 	case "multi":
@@ -85,6 +89,20 @@ func parseCLI(args []string) (cliInvocation, error) {
 	default:
 		return cliInvocation{}, fmt.Errorf("unsupported subcommand %q", args[0])
 	}
+}
+
+func parseHelpCLI(args []string) (cliInvocation, error) {
+	if len(args) != 0 {
+		return cliInvocation{}, errors.New("help does not accept positional arguments")
+	}
+	return cliInvocation{Command: "help"}, nil
+}
+
+func parseVersionCLI(args []string) (cliInvocation, error) {
+	if len(args) != 0 {
+		return cliInvocation{}, errors.New("version does not accept positional arguments")
+	}
+	return cliInvocation{Command: "version"}, nil
 }
 
 func parseShotCLI(args []string) (cliInvocation, error) {

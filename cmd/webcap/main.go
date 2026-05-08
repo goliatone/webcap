@@ -10,6 +10,7 @@ import (
 	pkgwebcap "github.com/goliatone/webcap"
 	commandwebcap "github.com/goliatone/webcap/commands/webcap"
 	webcapmcp "github.com/goliatone/webcap/mcp"
+	"github.com/goliatone/webcap/pkg/version"
 )
 
 func main() {
@@ -25,6 +26,8 @@ func main() {
 
 func run(ctx context.Context, invocation cliInvocation) error {
 	handlers := map[string]func(context.Context, cliInvocation) error{
+		"help":     runHelp,
+		"version":  runVersion,
 		"shot":     runShot,
 		"multi":    runMulti,
 		"diff":     runDiff,
@@ -37,6 +40,15 @@ func run(ctx context.Context, invocation cliInvocation) error {
 		return fmt.Errorf("unsupported command %q", invocation.Command)
 	}
 	return handler(ctx, invocation)
+}
+
+func runHelp(_ context.Context, _ cliInvocation) error {
+	_, err := fmt.Fprint(os.Stdout, helpText)
+	return err
+}
+
+func runVersion(_ context.Context, _ cliInvocation) error {
+	return version.Print(os.Stdout)
 }
 
 func runShot(ctx context.Context, invocation cliInvocation) error {
@@ -90,7 +102,7 @@ func runMCP(ctx context.Context, invocation cliInvocation) error {
 	service := newCaptureService(invocation.Browser)
 	server, err := webcapmcp.NewServer(webcapmcp.Config{
 		Name:         "webcap",
-		Version:      "0.1.0",
+		Version:      version.Tag,
 		Capture:      service,
 		Diff:         service,
 		LoadManifest: pkgwebcap.LoadManifest,
@@ -245,3 +257,34 @@ func printJSON(value any) {
 		log.Fatal(err)
 	}
 }
+
+const helpText = `webcap captures browser screenshots, runs capture manifests, compares images, and serves MCP tools.
+
+Usage:
+  webcap help
+  webcap version
+  webcap shot [flags] <url>
+  webcap multi [flags] <manifest-path>
+  webcap diff [flags] <base-path> <compare-path>
+  webcap workflow capture-scenario [flags] <scenario-path>
+  webcap report scenario <scenario-path>
+  webcap mcp serve [flags]
+
+Commands:
+  help                         Show this help message.
+  version                      Show version and build information.
+  shot                         Capture a single URL.
+  multi                        Run a YAML or JSON capture manifest.
+  diff                         Compare two image artifacts.
+  workflow capture-scenario    Capture every screen in a workflow scenario.
+  report scenario              Generate a workflow HTML review report.
+  mcp serve                    Start the stdio MCP server.
+
+Common browser flags:
+  --engine                     Capture engine: chromium or playwright.
+  --browser-binary             Optional browser executable path.
+  --headless                   Run Chromium in headless mode.
+  --playwright-browser         Playwright browser: chromium, firefox, or webkit.
+  --node-binary                Node.js binary used by the Playwright engine.
+  --playwright-runtime-dir     Optional override for the Playwright runtime directory.
+`

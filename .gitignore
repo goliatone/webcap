@@ -53,3 +53,5 @@ Temporary Items
 go.work
 .tmp
 **.db
+.codex
+build

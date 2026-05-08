@@ -7,9 +7,14 @@ fi
 
 export LGR_NO_TIMESTAMP=true
 
-PROJECT="webcap"
 GIT_MAIN="main"
 VERSION_FILE="./.version"
+PROJECT="${PROJECT:-webcap}"
+GO_MODULE="${GO_MODULE:-$(awk '/^module / { print $2; exit }' go.mod)}"
+BIN_NAME="${BIN_NAME:-webcap}"
+BIN_PACKAGE="${BIN_PACKAGE:-./cmd/webcap}"
+BUILD_DIR="${BUILD_DIR:-./build}"
+INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 
 # If we have a .taskenv file load it as source
 if [ -f .taskenv ]; then
@@ -24,7 +29,7 @@ PATH=$(pwd)/node_modules/.bin:$PATH
 # This will make local scripts available when present.
 PATH=$(pwd)/bin:$PATH
 
-GO_TOOLCHAIN="${GO_TOOLCHAIN:-local}"
+GO_TOOLCHAIN="${GO_TOOLCHAIN:-auto}"
 GO_QUALITY_ROOT_DIR="${GO_QUALITY_ROOT_DIR:-$(pwd)}"
 GO_GOLANGCI_LINT_VERSION="${GO_GOLANGCI_LINT_VERSION:-v2.11.3}"
 GO_GOLANGCI_LINT_VERSION_FILE="${GO_GOLANGCI_LINT_VERSION_FILE:-.golangci-lint-version}"
@@ -298,9 +303,173 @@ function _go:lint:patterns {
     printf '%s\n' "./..."
 }
 
+function _bin:path {
+    local bin_name="${1:-${BIN_NAME}}"
+
+    printf '%s/%s\n' "${BUILD_DIR%/}" "${bin_name}"
+}
+
+function _go:build:ldflags {
+    local build_version
+    local build_date
+    local build_commit
+    local build_user
+
+    build_version="${BUILD_VERSION:-$(version:get)}"
+    build_date="${BUILD_DATE:-$(date -u +%FT%TZ)}"
+    build_commit="${BUILD_COMMIT:-$(git rev-parse HEAD 2>/dev/null || echo unknown)}"
+    build_user="${BUILD_USER:-$(id -u -n 2>/dev/null || whoami)}"
+
+    printf '%s' "-s -w -X ${GO_MODULE}/pkg/version.Tag=${build_version} -X ${GO_MODULE}/pkg/version.Time=${build_date} -X ${GO_MODULE}/pkg/version.User=${build_user} -X ${GO_MODULE}/pkg/version.Commit=${build_commit}"
+}
+
 ##########################################
 # Application management
 ##########################################
+
+##
+## -----
+##
+## go:build [output] [package]
+##
+## Build the configured Go binary.
+##
+function go:build {
+    local output="${1:-}"
+    local package="${2:-${BIN_PACKAGE}}"
+    local go_bin
+    local ldflags
+
+    if [ -z "${output}" ]; then
+        output="$(_bin:path)"
+    fi
+
+    go_bin=$(_go:bin) || return 1
+    ldflags="$(_go:build:ldflags)" || return 1
+    mkdir -p "$(dirname "${output}")"
+
+    _task:log I "Building ${package} -> ${output}"
+    _task:log I "Version $(version:get), commit $(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+    GOTOOLCHAIN="${GO_TOOLCHAIN}" "${go_bin}" build -ldflags "${ldflags}" -o "${output}" "${package}" || return 1
+    _task:log OK "Built ${output}"
+}
+
+##
+## -----
+##
+## build [output] [package]
+##
+## Build the configured Go binary with version metadata.
+##
+function build {
+    go:build "$@"
+}
+
+##
+## -----
+##
+## release:build [tag] [output] [package]
+##
+## Build binary and optionally update .version first.
+##
+function release:build {
+    local tag="${1:-}"
+    local output="${2:-}"
+    local package="${3:-${BIN_PACKAGE}}"
+
+    if [ -n "${tag}" ]; then
+        version:set "${tag}" || return 1
+    fi
+
+    go:build "${output}" "${package}"
+}
+
+##
+## -----
+##
+## ci:build [output] [package]
+##
+## Build binary with version metadata for CI.
+##
+function ci:build {
+    go:build "${1:-$(_bin:path)}" "${2:-${BIN_PACKAGE}}"
+}
+
+##
+## -----
+##
+## install:local [binary-name] [install-dir]
+##
+## Build and install the configured Go binary locally.
+##
+function install:local {
+    local bin_name="${1:-${BIN_NAME}}"
+    local install_dir="${2:-${INSTALL_DIR}}"
+    local install_target
+    local install_parent
+    local output
+    local resolved_bin
+    local tmp_target
+    local -a install_cmd
+
+    output="$(_bin:path "${bin_name}")"
+
+    if [ "$(basename "${install_dir}")" = "${bin_name}" ]; then
+        install_target="${install_dir}"
+        install_dir="$(dirname "${install_target}")"
+    else
+        install_target="${install_dir%/}/${bin_name}"
+    fi
+
+    _task:log I "Installing ${bin_name} to ${install_target}..."
+
+    if ! go:build "${output}" "${BIN_PACKAGE}"; then
+        _task:log E "Build failed, installation aborted"
+        return 1
+    fi
+
+    install_parent="${install_dir}"
+    if [ ! -d "${install_parent}" ]; then
+        install_parent="$(dirname "${install_dir}")"
+    fi
+    if [ -w "${install_parent}" ]; then
+        install_cmd=()
+    else
+        install_cmd=(sudo)
+    fi
+
+    tmp_target="${install_target}.tmp.$$"
+    "${install_cmd[@]}" mkdir -p "${install_dir}" || return 1
+    "${install_cmd[@]}" rm -f "${tmp_target}" || return 1
+    "${install_cmd[@]}" cp "${output}" "${tmp_target}" || {
+        "${install_cmd[@]}" rm -f "${tmp_target}"
+        return 1
+    }
+    "${install_cmd[@]}" chmod +x "${tmp_target}" || {
+        "${install_cmd[@]}" rm -f "${tmp_target}"
+        return 1
+    }
+    "${install_cmd[@]}" mv -f "${tmp_target}" "${install_target}" || {
+        "${install_cmd[@]}" rm -f "${tmp_target}"
+        return 1
+    }
+    _task:log OK "${bin_name} installed to ${install_target}"
+
+    if "${install_target}" --help >/dev/null 2>&1; then
+        _task:log OK "Installation smoke check passed"
+    else
+        _task:log WARN "${bin_name} was installed, but ${install_target} failed --help"
+    fi
+
+    resolved_bin="$(command -v "${bin_name}" 2>/dev/null || true)"
+    if [ "${resolved_bin}" = "${install_target}" ]; then
+        _task:log I "Installation verified - ${bin_name} is available globally"
+    elif [ -n "${resolved_bin}" ]; then
+        _task:log WARN "${bin_name} was installed, but PATH resolves ${bin_name} to ${resolved_bin}"
+    else
+        _task:log WARN "${bin_name} was installed, but ${install_dir} is not on PATH"
+    fi
+}
 
 function go:tools:golangci-lint {
     local version

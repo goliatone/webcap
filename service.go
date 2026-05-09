@@ -20,9 +20,10 @@ type CaptureService interface {
 }
 
 type Service struct {
-	engine   Engine
-	now      func() time.Time
-	workflow WorkflowOptions
+	engine       Engine
+	now          func() time.Time
+	workflow     WorkflowOptions
+	semanticDiff SemanticDiffOptions
 }
 
 func NewService(engine Engine) *Service {
@@ -35,9 +36,10 @@ func NewServiceWithOptions(engine Engine, opts Options) *Service {
 		now = func() time.Time { return time.Now().UTC() }
 	}
 	return &Service{
-		engine:   engine,
-		now:      now,
-		workflow: opts.Workflow.normalized(),
+		engine:       engine,
+		now:          now,
+		workflow:     opts.Workflow.normalized(),
+		semanticDiff: opts.SemanticDiff.normalized(),
 	}
 }
 

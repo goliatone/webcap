@@ -26,20 +26,34 @@ func main() {
 
 func run(ctx context.Context, invocation cliInvocation) error {
 	handlers := map[string]func(context.Context, cliInvocation) error{
-		"help":     runHelp,
-		"version":  runVersion,
-		"shot":     runShot,
-		"multi":    runMulti,
-		"diff":     runDiff,
-		"mcp":      runMCP,
-		"workflow": runWorkflow,
-		"report":   runReport,
+		"help":          runHelp,
+		"version":       runVersion,
+		"shot":          runShot,
+		"multi":         runMulti,
+		"diff":          runDiff,
+		"semantic-diff": runSemanticDiff,
+		"mcp":           runMCP,
+		"workflow":      runWorkflow,
+		"report":        runReport,
 	}
 	handler, ok := handlers[invocation.Command]
 	if !ok {
 		return fmt.Errorf("unsupported command %q", invocation.Command)
 	}
 	return handler(ctx, invocation)
+}
+
+func runSemanticDiff(ctx context.Context, invocation cliInvocation) error {
+	service := pkgwebcap.NewService(nil)
+	handler := commandwebcap.NewSemanticDiffHandler(service)
+	result, err := handler.Handle(ctx, commandwebcap.SemanticDiffMessage{
+		Request: invocation.Semantic.Request,
+	})
+	if err != nil {
+		return err
+	}
+	printJSON(result)
+	return nil
 }
 
 func runHelp(_ context.Context, _ cliInvocation) error {
@@ -105,6 +119,7 @@ func runMCP(ctx context.Context, invocation cliInvocation) error {
 		Version:      version.Tag,
 		Capture:      service,
 		Diff:         service,
+		SemanticDiff: service,
 		LoadManifest: pkgwebcap.LoadManifest,
 	})
 	if err != nil {
@@ -266,6 +281,7 @@ Usage:
   webcap shot [flags] <url>
   webcap multi [flags] <manifest-path>
   webcap diff [flags] <base-path> <compare-path>
+  webcap semantic-diff [flags] <current-image> <reference-image>
   webcap workflow capture-scenario [flags] <scenario-path>
   webcap report scenario <scenario-path>
   webcap mcp serve [flags]
@@ -276,6 +292,7 @@ Commands:
   shot                         Capture a single URL.
   multi                        Run a YAML or JSON capture manifest.
   diff                         Compare two image artifacts.
+  semantic-diff                Compare two image artifacts with a vision LLM provider.
   workflow capture-scenario    Capture every screen in a workflow scenario.
   report scenario              Generate a workflow HTML review report.
   mcp serve                    Start the stdio MCP server.

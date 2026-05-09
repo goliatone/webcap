@@ -66,6 +66,42 @@ func TestParseDiffCLI(t *testing.T) {
 	}
 }
 
+func TestParseSemanticDiffCLI(t *testing.T) {
+	invocation, err := parseCLI([]string{
+		"semantic-diff",
+		"--provider", "openai",
+		"--model", "gpt-test",
+		"--mode", "focused",
+		"--prompt", "Check checkout CTA.",
+		"--focus", "checkout button,navigation labels",
+		"--metadata", "semantic.json",
+		"--timeout", "45s",
+		"--max-output-tokens", "500",
+		"--pixel-diff-image", "diff.png",
+		"--changed-pixels", "10",
+		"--total-pixels", "100",
+		"--changed-percent", "10",
+		"current.png",
+		"reference.png",
+	})
+	if err != nil {
+		t.Fatalf("parseCLI returned error: %v", err)
+	}
+	if invocation.Command != "semantic-diff" {
+		t.Fatalf("unexpected command: %s", invocation.Command)
+	}
+	req := invocation.Semantic.Request
+	if req.CurrentPath != "current.png" || req.ReferencePath != "reference.png" || req.Provider != "openai" || req.Model != "gpt-test" {
+		t.Fatalf("unexpected semantic request: %#v", req)
+	}
+	if req.Mode != pkgwebcap.SemanticDiffModeFocused || len(req.Focus) != 2 || req.PixelContext.PixelDiffImagePath != "diff.png" {
+		t.Fatalf("unexpected semantic options: %#v", req)
+	}
+	if req.MaxOutputTokens != 500 || req.Timeout != "45s" || req.MetadataPath != "semantic.json" {
+		t.Fatalf("unexpected semantic limits/metadata: %#v", req)
+	}
+}
+
 func TestParseHelpCLI(t *testing.T) {
 	invocation, err := parseCLI([]string{"help"})
 	if err != nil {

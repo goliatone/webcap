@@ -56,6 +56,20 @@ func (s *fakeDiffService) Diff(_ context.Context, req pkgwebcap.DiffRequest) (pk
 	return s.result, nil
 }
 
+type fakeSemanticDiffService struct {
+	result  pkgwebcap.SemanticDiffResult
+	err     error
+	lastReq pkgwebcap.SemanticDiffRequest
+}
+
+func (s *fakeSemanticDiffService) SemanticDiff(_ context.Context, req pkgwebcap.SemanticDiffRequest) (pkgwebcap.SemanticDiffResult, error) {
+	s.lastReq = req
+	if s.err != nil {
+		return pkgwebcap.SemanticDiffResult{}, s.err
+	}
+	return s.result, nil
+}
+
 func TestSessionToolsList(t *testing.T) {
 	server := mustTestServer(t)
 	session := server.NewSession()
@@ -74,8 +88,8 @@ func TestSessionToolsList(t *testing.T) {
 	if !ok {
 		t.Fatalf("unexpected tools/list result type: %T", resp.Result)
 	}
-	if len(result.Tools) != 4 {
-		t.Fatalf("expected 4 tools, got %d", len(result.Tools))
+	if len(result.Tools) != 5 {
+		t.Fatalf("expected 5 tools, got %d", len(result.Tools))
 	}
 }
 
@@ -182,6 +196,47 @@ func TestCompareImagesToolCall(t *testing.T) {
 	}
 	if diff.lastReq.BasePath != "base.png" || diff.lastReq.ComparePath != "compare.png" || diff.lastReq.Threshold != 0.2 {
 		t.Fatalf("unexpected diff request: %#v", diff.lastReq)
+	}
+}
+
+func TestSemanticDiffToolCall(t *testing.T) {
+	semantic := &fakeSemanticDiffService{result: sampleSemanticDiffResult()}
+	server, err := NewServer(Config{
+		Name:         "webcap",
+		Version:      "0.1.0",
+		Capture:      &fakeCaptureService{captureResult: sampleCaptureResult("/tmp/out.png")},
+		Diff:         &fakeDiffService{result: sampleDiffResult()},
+		SemanticDiff: semantic,
+		LoadManifest: func(string) (pkgwebcap.Manifest, error) {
+			return pkgwebcap.Manifest{}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewServer returned error: %v", err)
+	}
+	session := server.NewSession()
+	initializeSession(t, session)
+
+	resp := session.handle(context.Background(), []byte(`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"semantic_diff","arguments":{"current_path":"current.png","reference_path":"reference.png","provider":"openai","model":"gpt-test","mode":"focused","focus":["CTA"],"metadata_path":"semantic.json","pixel_diff_image_path":"diff.png","changed_pixels":2}}}`))
+	if resp == nil || resp.Error != nil {
+		t.Fatalf("tools/call returned protocol error: %#v", resp)
+	}
+	payload, err := json.Marshal(resp.Result)
+	if err != nil {
+		t.Fatalf("marshal result: %v", err)
+	}
+	var result callToolResult
+	if err := json.Unmarshal(payload, &result); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected successful tool result: %#v", result)
+	}
+	if semantic.lastReq.CurrentPath != "current.png" || semantic.lastReq.ReferencePath != "reference.png" || semantic.lastReq.Provider != "openai" {
+		t.Fatalf("unexpected semantic request: %#v", semantic.lastReq)
+	}
+	if semantic.lastReq.PixelContext.PixelDiffImagePath != "diff.png" || semantic.lastReq.PixelContext.ChangedPixels != 2 {
+		t.Fatalf("expected pixel context: %#v", semantic.lastReq.PixelContext)
 	}
 }
 
@@ -333,5 +388,23 @@ func sampleDiffResult() pkgwebcap.DiffResult {
 			ChangedFiles:  1,
 		},
 		CreatedAt: now,
+	}
+}
+
+func sampleSemanticDiffResult() pkgwebcap.SemanticDiffResult {
+	return pkgwebcap.SemanticDiffResult{
+		CurrentPath:   "/tmp/current.png",
+		ReferencePath: "/tmp/reference.png",
+		Provider:      "openai",
+		Model:         "gpt-test",
+		Summary:       "CTA moved lower.",
+		Verdict:       pkgwebcap.SemanticDiffVerdictNeedsReview,
+		Severity:      pkgwebcap.SemanticDiffSeverityMajor,
+		Differences: []pkgwebcap.SemanticDifference{{
+			Area:        "CTA",
+			Description: "CTA moved lower.",
+			Severity:    pkgwebcap.SemanticDiffSeverityMajor,
+		}},
+		MetadataPath: "/tmp/semantic.json",
 	}
 }

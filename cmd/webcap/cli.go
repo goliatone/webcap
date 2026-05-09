@@ -15,6 +15,7 @@ type cliInvocation struct {
 	Shot     shotOptions
 	Multi    multiOptions
 	Diff     diffOptions
+	Semantic semanticDiffOptions
 	Workflow workflowOptions
 	Report   reportOptions
 	MCP      mcpOptions
@@ -49,6 +50,11 @@ type diffOptions struct {
 	Request pkgwebcap.DiffRequest
 }
 
+type semanticDiffOptions struct {
+	Request  pkgwebcap.SemanticDiffRequest
+	FocusCSV string
+}
+
 type workflowOptions struct {
 	Action       string
 	ScenarioPath string
@@ -66,7 +72,7 @@ type mcpOptions struct {
 
 func parseCLI(args []string) (cliInvocation, error) {
 	if len(args) == 0 {
-		return cliInvocation{}, errors.New("expected subcommand: help, version, shot, multi, diff, workflow, report, or mcp")
+		return cliInvocation{}, errors.New("expected subcommand: help, version, shot, multi, diff, semantic-diff, workflow, report, or mcp")
 	}
 
 	switch strings.TrimSpace(args[0]) {
@@ -80,6 +86,8 @@ func parseCLI(args []string) (cliInvocation, error) {
 		return parseMultiCLI(args[1:])
 	case "diff":
 		return parseDiffCLI(args[1:])
+	case "semantic-diff":
+		return parseSemanticDiffCLI(args[1:])
 	case "workflow":
 		return parseWorkflowCLI(args[1:])
 	case "report":
@@ -217,6 +225,52 @@ func parseDiffCLI(args []string) (cliInvocation, error) {
 	invocation.Diff.Request.ComparePath = strings.TrimSpace(fs.Args()[1])
 	invocation.Diff.Request.OutputPath = strings.TrimSpace(outputPath)
 	invocation.Diff.Request.MetadataPath = strings.TrimSpace(metadataPath)
+	return invocation, nil
+}
+
+func parseSemanticDiffCLI(args []string) (cliInvocation, error) {
+	var (
+		stderr        bytes.Buffer
+		mode          string
+		pixelDiffPath string
+		threshold     float64
+	)
+
+	invocation := cliInvocation{Command: "semantic-diff"}
+	fs := flag.NewFlagSet("webcap semantic-diff", flag.ContinueOnError)
+	fs.SetOutput(&stderr)
+	fs.StringVar(&invocation.Semantic.Request.Provider, "provider", "", "Semantic diff provider: openai or anthropic.")
+	fs.StringVar(&invocation.Semantic.Request.Model, "model", "", "Provider model name.")
+	fs.StringVar(&mode, "mode", string(pkgwebcap.SemanticDiffModeGeneral), "Semantic diff mode: general, focused, copy, layout, accessibility, or custom.")
+	fs.StringVar(&invocation.Semantic.Request.Prompt, "prompt", "", "Additional prompt instructions.")
+	fs.StringVar(&invocation.Semantic.Request.PromptPath, "prompt-file", "", "Path to a prompt instruction file.")
+	fs.StringVar(&invocation.Semantic.FocusCSV, "focus", "", "Comma-separated focus areas.")
+	fs.StringVar(&invocation.Semantic.Request.MetadataPath, "metadata", "", "Semantic diff metadata JSON path.")
+	fs.StringVar(&invocation.Semantic.Request.RawResponsePath, "raw-response", "", "Optional raw provider response path.")
+	fs.BoolVar(&invocation.Semantic.Request.PersistRawResponse, "persist-raw-response", false, "Persist the raw provider response for debugging.")
+	fs.StringVar(&invocation.Semantic.Request.Timeout, "timeout", "", "Provider request timeout such as 60s.")
+	fs.IntVar(&invocation.Semantic.Request.MaxOutputTokens, "max-output-tokens", 0, "Provider max output token limit.")
+	fs.StringVar(&pixelDiffPath, "pixel-diff-image", "", "Existing pixel diff image to include as optional context.")
+	fs.IntVar(&invocation.Semantic.Request.PixelContext.ChangedPixels, "changed-pixels", 0, "Existing pixel diff changed pixel count.")
+	fs.IntVar(&invocation.Semantic.Request.PixelContext.TotalPixels, "total-pixels", 0, "Existing pixel diff total pixel count.")
+	fs.Float64Var(&invocation.Semantic.Request.PixelContext.ChangedPercent, "changed-percent", 0, "Existing pixel diff changed percent.")
+	fs.Float64Var(&threshold, "threshold", 0, "Existing pixel diff threshold.")
+	if err := fs.Parse(args); err != nil {
+		message := strings.TrimSpace(stderr.String())
+		if message == "" {
+			message = err.Error()
+		}
+		return cliInvocation{}, errors.New(message)
+	}
+	if len(fs.Args()) != 2 {
+		return cliInvocation{}, errors.New("semantic-diff requires current and reference image paths")
+	}
+	invocation.Semantic.Request.CurrentPath = strings.TrimSpace(fs.Args()[0])
+	invocation.Semantic.Request.ReferencePath = strings.TrimSpace(fs.Args()[1])
+	invocation.Semantic.Request.Mode = pkgwebcap.SemanticDiffMode(mode)
+	invocation.Semantic.Request.Focus = splitCSV(invocation.Semantic.FocusCSV)
+	invocation.Semantic.Request.PixelContext.PixelDiffImagePath = strings.TrimSpace(pixelDiffPath)
+	invocation.Semantic.Request.PixelContext.Threshold = threshold
 	return invocation, nil
 }
 

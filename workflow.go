@@ -173,6 +173,10 @@ func normalizeWorkflowDefaults(scenario *WorkflowScenario) error {
 	if err != nil {
 		return err
 	}
+	scenario.Defaults.SemanticDiff, err = normalizeWorkflowSemanticDiff(scenario.Defaults.SemanticDiff)
+	if err != nil {
+		return err
+	}
 	if scenario.Defaults.Readiness == "" {
 		scenario.Defaults.Readiness = defaultReadinessMode
 	}
@@ -261,10 +265,21 @@ func normalizeWorkflowScreen(screen *WorkflowScreen, scenario WorkflowScenario) 
 	screen.Query = normalizeStringMap(screen.Query)
 	screen.Hooks = normalizeWorkflowHooks(screen.Hooks)
 	screen.Comparison = mergeWorkflowComparison(scenario.Defaults.Comparison, screen.Comparison)
+	screen.SemanticDiff = mergeWorkflowSemanticDiff(scenario.Defaults.SemanticDiff, screen.SemanticDiff)
 	var err error
 	screen.Comparison, err = normalizeWorkflowComparison(screen.Comparison)
 	if err != nil {
 		return err
+	}
+	screen.SemanticDiff, err = normalizeWorkflowSemanticDiff(screen.SemanticDiff)
+	if err != nil {
+		return err
+	}
+	if screen.SemanticDiff.PromptPath != "" {
+		screen.SemanticDiff.PromptPath = resolveWorkflowPath(scenario.SourceDir, screen.SemanticDiff.PromptPath)
+	}
+	if screen.SemanticDiff.RawResponsePath != "" {
+		screen.SemanticDiff.RawResponsePath = resolveWorkflowPath(scenario.SourceDir, screen.SemanticDiff.RawResponsePath)
 	}
 	if screen.ID == "" {
 		return newCaptureError(CodeValidation, "normalize_workflow_screen", "workflow screen id is required", nil)

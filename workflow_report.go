@@ -354,6 +354,12 @@ a:hover { color: var(--accent-hover); }
 }
 .warning-block-title { font-size: 13px; font-weight: 600; color: var(--warning); margin: 0 0 4px; }
 .warning-block-list { margin: 8px 0 0; padding-left: 20px; font-size: 13px; color: var(--warning); }
+.semantic-summary { color: var(--text-secondary); font-size: 13px; margin: 8px 0 12px; }
+.semantic-diff-list { display: flex; flex-direction: column; gap: 10px; }
+.semantic-diff-item { border-top: 1px solid var(--border); padding-top: 10px; }
+.semantic-diff-title { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; font-weight: 600; color: var(--text); }
+.semantic-diff-description { color: var(--text-secondary); font-size: 12px; margin-top: 4px; }
+.semantic-diff-evidence { color: var(--text-muted); font-size: 12px; margin-top: 4px; }
 
 /* Evidence Panel */
 .evidence-panel {
@@ -918,6 +924,36 @@ var workflowReportTemplate = template.Must(template.New("workflow-report").Funcs
               </div>
 
               <div class="screen-detail-sidebar">
+                {{ if $entry.SemanticDiff }}
+                <div class="evidence-panel">
+                  <div class="evidence-panel-header">
+                    <span class="evidence-panel-title">Semantic Diff</span>
+                  </div>
+                  <div class="evidence-panel-body">
+                    <div class="screen-card-meta">
+                      <span class="pill pill-info">{{ $entry.SemanticDiff.Verdict }}</span>
+                      <span class="pill pill-{{ if or (eq $entry.SemanticDiff.Severity "major") (eq $entry.SemanticDiff.Severity "blocking") }}warning{{ else }}info{{ end }}">{{ $entry.SemanticDiff.Severity }}</span>
+                    </div>
+                    <div class="semantic-summary">{{ $entry.SemanticDiff.Summary }}</div>
+                    {{ if $entry.SemanticDiff.Differences }}
+                    <div class="semantic-diff-list">
+                      {{ range $entry.SemanticDiff.Differences }}
+                      <div class="semantic-diff-item">
+                        <div class="semantic-diff-title">
+                          <span>{{ if .Area }}{{ .Area }}{{ else }}Difference{{ end }}</span>
+                          <span class="pill">{{ .Severity }}</span>
+                        </div>
+                        <div class="semantic-diff-description">{{ .Description }}</div>
+                        {{ if .Evidence }}<div class="semantic-diff-evidence">{{ .Evidence }}</div>{{ end }}
+                        {{ if .Recommendation }}<div class="semantic-diff-evidence">{{ .Recommendation }}</div>{{ end }}
+                      </div>
+                      {{ end }}
+                    </div>
+                    {{ end }}
+                  </div>
+                </div>
+                {{ end }}
+
                 {{ if $entry.ExpectedElements }}
                 <div class="evidence-panel">
                   <div class="evidence-panel-header">
@@ -1585,8 +1621,86 @@ func (s *Service) buildWorkflowReportEntry(ctx context.Context, scenario Workflo
 	entry.DiffMetadataPath = diffResult.MetadataPath
 	entry.DiffEntry = diffResult.Entry
 	entry.DiffSummary = &diffResult.Summary
+	if shouldRunWorkflowSemanticDiff(screen.SemanticDiff, entry.DiffEntry) {
+		semanticResult, semanticErr := s.runWorkflowSemanticDiff(ctx, scenario, screen, entry)
+		if semanticErr != nil {
+			entry.Warnings = append(entry.Warnings, errorWarning(semanticErr))
+		} else {
+			entry.SemanticDiff = &semanticResult
+			entry.SemanticMetadataPath = semanticResult.MetadataPath
+			entry.SemanticFailure = workflowSemanticDiffFailsPolicy(screen.SemanticDiff, semanticResult)
+		}
+	}
 	entry.Status = workflowReviewStatusForEntry(entry)
 	return entry, nil
+}
+
+func (s *Service) runWorkflowSemanticDiff(ctx context.Context, scenario WorkflowScenario, screen WorkflowScreen, entry WorkflowReportEntry) (SemanticDiffResult, error) {
+	metadataPath := filepath.Join(scenario.Artifacts.DiffDir, screen.OutputName+".semantic.json")
+	persistRaw := s.semanticDiff.PersistRawResponses && screen.SemanticDiff.PersistRawResponse
+	rawResponsePath := ""
+	if persistRaw {
+		rawResponsePath = screen.SemanticDiff.RawResponsePath
+	}
+	req := SemanticDiffRequest{
+		CurrentPath:        entry.ComparedCurrentImagePath,
+		ReferencePath:      entry.ComparedReferenceImagePath,
+		Provider:           screen.SemanticDiff.Provider,
+		Model:              screen.SemanticDiff.Model,
+		Mode:               screen.SemanticDiff.Mode,
+		Prompt:             screen.SemanticDiff.Prompt,
+		PromptPath:         screen.SemanticDiff.PromptPath,
+		Focus:              append([]string(nil), screen.SemanticDiff.Focus...),
+		MetadataPath:       metadataPath,
+		RawResponsePath:    rawResponsePath,
+		Timeout:            screen.SemanticDiff.Timeout,
+		MaxOutputTokens:    screen.SemanticDiff.MaxOutputTokens,
+		PersistRawResponse: persistRaw,
+	}
+	if entry.DiffEntry != nil {
+		req.PixelContext = semanticPixelContextFromDiffEntry(*entry.DiffEntry)
+	}
+	return s.SemanticDiff(ctx, req)
+}
+
+func shouldRunWorkflowSemanticDiff(config WorkflowSemanticDiff, diffEntry *DiffEntry) bool {
+	if !config.enabled() || config.Run == SemanticDiffRunNever {
+		return false
+	}
+	if config.Run == SemanticDiffRunAlways {
+		return true
+	}
+	return diffEntry != nil && diffEntry.Changed
+}
+
+func workflowSemanticDiffFailsPolicy(config WorkflowSemanticDiff, result SemanticDiffResult) bool {
+	if config.AdvisoryPolicy != SemanticDiffAdvisoryEnforce {
+		return false
+	}
+	for _, verdict := range config.FailureVerdicts {
+		if result.Verdict == verdict {
+			return true
+		}
+	}
+	if config.FailureSeverity == "" {
+		return false
+	}
+	return semanticSeverityRank(result.Severity) >= semanticSeverityRank(config.FailureSeverity)
+}
+
+func semanticSeverityRank(value SemanticDiffSeverity) int {
+	switch value {
+	case SemanticDiffSeverityBlocking:
+		return 4
+	case SemanticDiffSeverityMajor:
+		return 3
+	case SemanticDiffSeverityMinor:
+		return 2
+	case SemanticDiffSeverityInfo:
+		return 1
+	default:
+		return 0
+	}
 }
 
 func workflowStoriesForIDs(index map[string]WorkflowStory, ids []string) []WorkflowStory {
@@ -1734,6 +1848,12 @@ func workflowReviewStatusForEntry(entry WorkflowReportEntry) WorkflowReviewStatu
 			Level:   workflowStatusError,
 			Label:   "Missing Assets",
 			Summary: "This screen is missing one or more required images.",
+		}
+	case entry.SemanticFailure:
+		return WorkflowReviewStatus{
+			Level:   workflowStatusError,
+			Label:   "Semantic Failure",
+			Summary: "Semantic diff policy flagged this screen.",
 		}
 	case len(entry.Warnings) > 0:
 		return WorkflowReviewStatus{

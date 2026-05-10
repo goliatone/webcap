@@ -26,13 +26,19 @@ func GetVersion() string {
 func Print(w io.Writer) error {
 	tw := new(tabwriter.Writer)
 	tw.Init(w, 0, 0, 0, ' ', tabwriter.AlignRight)
-	fmt.Fprintln(tw)
-	fmt.Fprintln(tw, "webcap:", "\t", "Browser screenshots, image diffs, workflow reports, and MCP tools")
-	fmt.Fprintln(tw, "Version:", "\t", Tag)
-	fmt.Fprintln(tw, "Build Commit Hash:", "\t", Commit)
-	fmt.Fprintln(tw, "Build Time:", "\t", Time)
-	fmt.Fprintln(tw, "Build User:", "\t", User)
-	fmt.Fprintln(tw, "Info:", "\t", "https://github.com/goliatone/webcap")
-	fmt.Fprintln(tw)
+	for _, line := range [][]any{
+		nil,
+		{"webcap:", "\t", "Browser screenshots, image diffs, workflow reports, and MCP tools"},
+		{"Version:", "\t", Tag},
+		{"Build Commit Hash:", "\t", Commit},
+		{"Build Time:", "\t", Time},
+		{"Build User:", "\t", User},
+		{"Info:", "\t", "https://github.com/goliatone/webcap"},
+		nil,
+	} {
+		if _, err := fmt.Fprintln(tw, line...); err != nil {
+			return err
+		}
+	}
 	return tw.Flush()
 }

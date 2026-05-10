@@ -6,11 +6,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	pkgwebcap "github.com/goliatone/webcap"
+	"github.com/goliatone/webcap/pkg/llms"
 )
 
 type fakeCaptureService struct {
@@ -240,6 +249,107 @@ func TestSemanticDiffToolCall(t *testing.T) {
 	}
 }
 
+func TestSemanticDiffToolCallUsesDefaultServiceProvider(t *testing.T) {
+	serverHTTP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer mcp-key" {
+			t.Fatalf("expected OpenAI auth header, got %q", r.Header.Get("Authorization"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"model":"gpt-test","output":[{"type":"message","content":[{"type":"output_text","text":"{\"summary\":\"MCP semantic ok\",\"verdict\":\"no_meaningful_change\",\"severity\":\"info\"}"}]}]}`))
+	}))
+	defer serverHTTP.Close()
+
+	dir := t.TempDir()
+	currentPath := filepath.Join(dir, "current.png")
+	referencePath := filepath.Join(dir, "reference.png")
+	writeMCPTestPNG(t, currentPath, color.NRGBA{R: 255, A: 255})
+	writeMCPTestPNG(t, referencePath, color.NRGBA{B: 255, A: 255})
+
+	service := pkgwebcap.NewServiceWithOptions(nil, pkgwebcap.Options{SemanticDiff: pkgwebcap.SemanticDiffOptions{
+		CredentialResolver: func(context.Context, string) (string, error) { return "mcp-key", nil },
+		OpenAIBaseURL:      serverHTTP.URL,
+	}})
+	server, err := NewServer(Config{
+		Name:         "webcap",
+		Version:      "0.1.0",
+		Capture:      &fakeCaptureService{captureResult: sampleCaptureResult("/tmp/out.png")},
+		Diff:         service,
+		LoadManifest: func(string) (pkgwebcap.Manifest, error) { return pkgwebcap.Manifest{}, nil },
+	})
+	if err != nil {
+		t.Fatalf("NewServer returned error: %v", err)
+	}
+	session := server.NewSession()
+	initializeSession(t, session)
+
+	request := fmt.Sprintf(`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"semantic_diff","arguments":{"current_path":%q,"reference_path":%q,"provider":"openai","model":"gpt-test","metadata_path":%q}}}`, currentPath, referencePath, filepath.Join(dir, "semantic.json"))
+	resp := session.handle(context.Background(), []byte(request))
+	if resp == nil || resp.Error != nil {
+		t.Fatalf("tools/call returned protocol error: %#v", resp)
+	}
+	payload, err := json.Marshal(resp.Result)
+	if err != nil {
+		t.Fatalf("marshal result: %v", err)
+	}
+	var result callToolResult
+	if err := json.Unmarshal(payload, &result); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	structured, ok := result.StructuredContent.(map[string]any)
+	if result.IsError || !ok || structured["summary"] != "MCP semantic ok" {
+		t.Fatalf("expected default semantic provider result: %#v", result)
+	}
+}
+
+func TestSemanticDiffToolCallUsesCodexCLIServiceProvider(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fake uses POSIX sh")
+	}
+	dir := t.TempDir()
+	currentPath := filepath.Join(dir, "current.png")
+	referencePath := filepath.Join(dir, "reference.png")
+	writeMCPTestPNG(t, currentPath, color.NRGBA{R: 255, A: 255})
+	writeMCPTestPNG(t, referencePath, color.NRGBA{B: 255, A: 255})
+	fake := writeMCPFakeCodex(t, dir, `#!/bin/sh
+cat >/dev/null
+printf '{"summary":"MCP codex ok","verdict":"no_meaningful_change","severity":"info"}\n'
+`)
+
+	service := pkgwebcap.NewServiceWithOptions(nil, pkgwebcap.Options{SemanticDiff: pkgwebcap.SemanticDiffOptions{
+		LLMs: llms.Options{CodexCLI: llms.CodexCLIOptions{CommandPath: fake}},
+	}})
+	server, err := NewServer(Config{
+		Name:         "webcap",
+		Version:      "0.1.0",
+		Capture:      &fakeCaptureService{captureResult: sampleCaptureResult("/tmp/out.png")},
+		Diff:         service,
+		LoadManifest: func(string) (pkgwebcap.Manifest, error) { return pkgwebcap.Manifest{}, nil },
+	})
+	if err != nil {
+		t.Fatalf("NewServer returned error: %v", err)
+	}
+	session := server.NewSession()
+	initializeSession(t, session)
+
+	request := fmt.Sprintf(`{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"semantic_diff","arguments":{"current_path":%q,"reference_path":%q,"provider":"codex-cli","model":"gpt-test","metadata_path":%q}}}`, currentPath, referencePath, filepath.Join(dir, "semantic.json"))
+	resp := session.handle(context.Background(), []byte(request))
+	if resp == nil || resp.Error != nil {
+		t.Fatalf("tools/call returned protocol error: %#v", resp)
+	}
+	payload, err := json.Marshal(resp.Result)
+	if err != nil {
+		t.Fatalf("marshal result: %v", err)
+	}
+	var result callToolResult
+	if err := json.Unmarshal(payload, &result); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	structured, ok := result.StructuredContent.(map[string]any)
+	if result.IsError || !ok || structured["summary"] != "MCP codex ok" {
+		t.Fatalf("expected codex semantic provider result: %#v", result)
+	}
+}
+
 func TestServeRoundTripCapturePage(t *testing.T) {
 	capture := &fakeCaptureService{
 		captureResult: sampleCaptureResult("/tmp/out.png"),
@@ -407,4 +517,30 @@ func sampleSemanticDiffResult() pkgwebcap.SemanticDiffResult {
 		}},
 		MetadataPath: "/tmp/semantic.json",
 	}
+}
+
+func writeMCPTestPNG(t *testing.T, path string, c color.NRGBA) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("create image dir: %v", err)
+	}
+	img := image.NewNRGBA(image.Rect(0, 0, 1, 1))
+	img.SetNRGBA(0, 0, c)
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create image: %v", err)
+	}
+	defer file.Close()
+	if err := png.Encode(file, img); err != nil {
+		t.Fatalf("encode image: %v", err)
+	}
+}
+
+func writeMCPFakeCodex(t *testing.T, dir, body string) string {
+	t.Helper()
+	path := filepath.Join(dir, "codex-fake")
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatalf("write fake codex: %v", err)
+	}
+	return path
 }

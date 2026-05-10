@@ -5,9 +5,13 @@ import (
 	"image/color"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/goliatone/webcap/pkg/llms"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -16,25 +20,52 @@ func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return fn(req)
 }
 
-func TestOpenAISemanticProviderBuildsVisionRequest(t *testing.T) {
-	body, err := buildOpenAISemanticRequest(SemanticProviderRequest{
+type recordingLLMSProvider struct {
+	name    string
+	lastReq llms.Request
+	resp    llms.Response
+}
+
+func (p *recordingLLMSProvider) Name() string { return p.name }
+
+func (p *recordingLLMSProvider) CompareImages(_ context.Context, req llms.Request) (llms.Response, error) {
+	p.lastReq = req
+	return p.resp, nil
+}
+
+func TestLLMSSemanticDiffProviderAdaptsRequestAndResponse(t *testing.T) {
+	provider := &recordingLLMSProvider{name: "codex-cli", resp: llms.Response{
+		Provider: "codex-cli",
+		Model:    "gpt-test",
+		RawText:  `{"summary":"ok","verdict":"no_meaningful_change","severity":"info"}`,
+		Warnings: []llms.Warning{{Code: "stderr", Message: "diagnostic"}},
+		Metadata: map[string]string{"Command": "codex"},
+		Usage:    llms.Usage{InputTokens: 1, OutputTokens: 2, TotalTokens: 3},
+	}}
+	adapter := NewLLMSSemanticDiffProvider(provider)
+	resp, err := adapter.CompareImages(context.Background(), SemanticProviderRequest{
+		Provider:        "codex-cli",
 		Model:           "gpt-test",
 		Prompt:          "Compare",
-		MaxOutputTokens: 100,
+		Timeout:         1,
+		MaxOutputTokens: 10,
 		StructuredJSON:  true,
 		Images: []SemanticImagePayload{{
+			Role:       "pixel_diff",
+			Path:       "diff.png",
 			MIMEType:   "image/png",
 			Base64Data: "abc",
+			ByteSize:   3,
 		}},
 	})
 	if err != nil {
-		t.Fatalf("buildOpenAISemanticRequest returned error: %v", err)
+		t.Fatalf("CompareImages returned error: %v", err)
 	}
-	text := string(body)
-	for _, expected := range []string{`"model":"gpt-test"`, `"input_image"`, "data:image/png;base64,abc", `"json_object"`} {
-		if !strings.Contains(text, expected) {
-			t.Fatalf("expected OpenAI body to contain %q: %s", expected, text)
-		}
+	if provider.lastReq.Provider != "codex-cli" || provider.lastReq.Images[0].Role != llms.ImageRoleDiff || !provider.lastReq.StructuredJSON {
+		t.Fatalf("unexpected adapted request: %#v", provider.lastReq)
+	}
+	if resp.Provider != "codex-cli" || resp.Model != "gpt-test" || resp.Usage.TotalTokens != 3 || resp.Warnings[0].Code != "stderr" {
+		t.Fatalf("unexpected adapted response: %#v", resp)
 	}
 }
 
@@ -68,27 +99,6 @@ func TestOpenAISemanticProviderUsesHTTPTransport(t *testing.T) {
 	}
 	if !sawAuth || resp.Model != "gpt-test" || resp.Usage.TotalTokens != 3 || !strings.Contains(resp.RawText, `"summary"`) {
 		t.Fatalf("unexpected provider response/auth: auth=%v resp=%#v", sawAuth, resp)
-	}
-}
-
-func TestAnthropicSemanticProviderBuildsVisionRequest(t *testing.T) {
-	body, err := buildAnthropicSemanticRequest(SemanticProviderRequest{
-		Model:           "claude-test",
-		Prompt:          "Compare",
-		MaxOutputTokens: 100,
-		Images: []SemanticImagePayload{{
-			MIMEType:   "image/png",
-			Base64Data: "abc",
-		}},
-	})
-	if err != nil {
-		t.Fatalf("buildAnthropicSemanticRequest returned error: %v", err)
-	}
-	text := string(body)
-	for _, expected := range []string{`"model":"claude-test"`, `"type":"image"`, `"media_type":"image/png"`, `"data":"abc"`} {
-		if !strings.Contains(text, expected) {
-			t.Fatalf("expected Anthropic body to contain %q: %s", expected, text)
-		}
 	}
 }
 
@@ -211,4 +221,47 @@ func TestSemanticDiffOptionsCallerProviderOverridesBuiltIn(t *testing.T) {
 	if provider.lastReq.Provider != "openai" || result.Provider != "custom-openai" || result.Summary != "custom provider" {
 		t.Fatalf("caller provider was not used: req=%#v result=%#v", provider.lastReq, result)
 	}
+}
+
+func TestSemanticDiffOptionsRegistersCodexCLIProvider(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fake uses POSIX sh")
+	}
+	dir := t.TempDir()
+	currentPath := filepath.Join(dir, "current.png")
+	referencePath := filepath.Join(dir, "reference.png")
+	if err := writeTestPNG(currentPath, []color.NRGBA{{R: 255, A: 255}}); err != nil {
+		t.Fatalf("write current: %v", err)
+	}
+	if err := writeTestPNG(referencePath, []color.NRGBA{{B: 255, A: 255}}); err != nil {
+		t.Fatalf("write reference: %v", err)
+	}
+	fake := writeRootFakeCodex(t, dir, `#!/bin/sh
+cat >/dev/null
+printf '{"summary":"codex ok","verdict":"no_meaningful_change","severity":"info"}\n'
+`)
+	service := NewServiceWithOptions(nil, Options{SemanticDiff: SemanticDiffOptions{
+		LLMs: llms.Options{CodexCLI: llms.CodexCLIOptions{CommandPath: fake}},
+	}})
+	result, err := service.SemanticDiff(context.Background(), SemanticDiffRequest{
+		CurrentPath:   currentPath,
+		ReferencePath: referencePath,
+		Provider:      "codex-cli",
+		MetadataPath:  filepath.Join(dir, "semantic.json"),
+	})
+	if err != nil {
+		t.Fatalf("SemanticDiff returned error: %v", err)
+	}
+	if result.Provider != "codex-cli" || result.Summary != "codex ok" {
+		t.Fatalf("unexpected semantic result: %#v", result)
+	}
+}
+
+func writeRootFakeCodex(t *testing.T, dir, body string) string {
+	t.Helper()
+	path := filepath.Join(dir, "codex-fake")
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatalf("write fake codex: %v", err)
+	}
+	return path
 }

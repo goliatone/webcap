@@ -24,7 +24,9 @@ func postJSON(ctx context.Context, client *http.Client, url, apiKey string, head
 	if err != nil {
 		return nil, 0, fmt.Errorf("provider http request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 	payload, readErr := io.ReadAll(resp.Body)
 	if readErr != nil {
 		return nil, resp.StatusCode, fmt.Errorf("read provider response: %w", readErr)

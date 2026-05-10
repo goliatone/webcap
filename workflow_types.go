@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"time"
+
+	"github.com/goliatone/webcap/pkg/llms"
 )
 
 const (
@@ -29,6 +31,7 @@ type SemanticDiffOptions struct {
 	MaxImageBytes       int64
 	MaxOutputTokens     int
 	PersistRawResponses bool
+	LLMs                llms.Options
 	OpenAIBaseURL       string
 	AnthropicBaseURL    string
 }

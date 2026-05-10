@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -46,12 +47,15 @@ func (p *CodexCLIProvider) CompareImages(ctx context.Context, req Request) (Resp
 	if err != nil {
 		return Response{}, fmt.Errorf("create codex temp dir: %w", err)
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() {
+		_ = os.RemoveAll(tempDir)
+	}()
 
 	args, resultPath, err := p.args(req, tempDir)
 	if err != nil {
 		return Response{}, err
 	}
+	// #nosec G204 -- this provider intentionally executes a user-configured Codex CLI with structured arguments.
 	cmd := exec.CommandContext(ctx, options.CommandPath, args...)
 	cmd.Dir = options.WorkingDir
 	cmd.Stdin = strings.NewReader(req.Prompt)
@@ -65,14 +69,14 @@ func (p *CodexCLIProvider) CompareImages(ctx context.Context, req Request) (Resp
 	timing := Timing{StartedAt: startedAt, CompletedAt: completedAt, Duration: completedAt.Sub(startedAt)}
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return Response{}, fmt.Errorf("codex CLI timed out or was cancelled: %w", ctxErr)
+			return Response{}, codexExecutionError(options, args, stdout.String(), stderr.String(), ctxErr, ctxErr, -1)
 		}
-		return Response{}, fmt.Errorf("codex CLI failed: %w%s", err, stderrSuffix(stderr.String(), options.StderrLimit))
+		return Response{}, codexExecutionError(options, args, stdout.String(), stderr.String(), err, nil, -1)
 	}
 
 	raw, err := readCodexOutput(resultPath, stdout.String())
 	if err != nil {
-		return Response{}, err
+		return Response{}, codexExecutionError(options, args, stdout.String(), stderr.String(), err, nil, 0)
 	}
 	warnings := codexWarnings(stderr.String(), options.StderrLimit)
 	return Response{
@@ -86,6 +90,27 @@ func (p *CodexCLIProvider) CompareImages(ctx context.Context, req Request) (Resp
 		Exit:   Exit{Code: 0},
 		Timing: timing,
 	}, nil
+}
+
+func codexExecutionError(options CodexCLIOptions, args []string, stdout, stderr string, cause error, ctxErr error, defaultExitCode int) *ExecutionError {
+	exitCode := defaultExitCode
+	var exitErr *exec.ExitError
+	if errors.As(cause, &exitErr) {
+		exitCode = exitErr.ExitCode()
+	}
+	timedOut := errors.Is(ctxErr, context.DeadlineExceeded)
+	cancelled := errors.Is(ctxErr, context.Canceled)
+	return &ExecutionError{
+		Provider:  ProviderCodexCLI,
+		Command:   options.CommandPath,
+		Args:      append([]string(nil), args...),
+		ExitCode:  exitCode,
+		Stdout:    limitString(strings.TrimSpace(stdout), options.StderrLimit),
+		Stderr:    limitString(strings.TrimSpace(stderr), options.StderrLimit),
+		TimedOut:  timedOut,
+		Cancelled: cancelled,
+		Err:       cause,
+	}
 }
 
 func normalizeCodexCLIOptions(options CodexCLIOptions) CodexCLIOptions {
@@ -169,7 +194,7 @@ func writeCodexSchema(tempDir string) (string, error) {
 
 func readCodexOutput(resultPath, stdout string) (string, error) {
 	if strings.TrimSpace(resultPath) != "" {
-		if payload, err := os.ReadFile(resultPath); err == nil {
+		if payload, err := readFileInRoot(resultPath); err == nil {
 			if text := strings.TrimSpace(string(payload)); text != "" {
 				return text, nil
 			}
@@ -183,6 +208,33 @@ func readCodexOutput(resultPath, stdout string) (string, error) {
 	return "", fmt.Errorf("codex CLI produced no output")
 }
 
+func readFileInRoot(path string) ([]byte, error) {
+	root, name, err := openPathRoot(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = root.Close()
+	}()
+	file, err := root.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = file.Close()
+	}()
+	return io.ReadAll(file)
+}
+
+func openPathRoot(path string) (*os.Root, string, error) {
+	path = filepath.Clean(path)
+	root, err := os.OpenRoot(filepath.Dir(path))
+	if err != nil {
+		return nil, "", err
+	}
+	return root, filepath.Base(path), nil
+}
+
 func codexWarnings(stderr string, limit int) []Warning {
 	stderr = strings.TrimSpace(stderr)
 	if stderr == "" {
@@ -192,14 +244,6 @@ func codexWarnings(stderr string, limit int) []Warning {
 		Code:    "codex_cli_stderr",
 		Message: limitString(stderr, limit),
 	}}
-}
-
-func stderrSuffix(stderr string, limit int) string {
-	stderr = strings.TrimSpace(stderr)
-	if stderr == "" {
-		return ""
-	}
-	return ": " + limitString(stderr, limit)
 }
 
 func limitString(value string, limit int) string {

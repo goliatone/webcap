@@ -3,6 +3,7 @@ package llms
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 )
@@ -110,9 +111,14 @@ func ParseOpenAIResponse(payload []byte) (string, string, Usage, error) {
 			}
 		}
 	}
-	return strings.Join(parts, "\n"), body.Model, Usage{
+	usage := Usage{
 		InputTokens:  body.Usage.InputTokens,
 		OutputTokens: body.Usage.OutputTokens,
 		TotalTokens:  body.Usage.TotalTokens,
-	}, nil
+	}
+	text := strings.Join(parts, "\n")
+	if text == "" {
+		return "", body.Model, usage, errors.New("openai response contained no text")
+	}
+	return text, body.Model, usage, nil
 }

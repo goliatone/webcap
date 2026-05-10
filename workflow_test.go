@@ -577,7 +577,7 @@ func TestGenerateWorkflowReportRunsSemanticDiffChangedOnly(t *testing.T) {
 		},
 		Defaults: WorkflowDefaults{
 			SemanticDiff: WorkflowSemanticDiff{
-				Enabled:  boolPtr(true),
+				Enabled:  new(true),
 				Provider: "openai",
 				Model:    "gpt-test",
 				Mode:     SemanticDiffModeFocused,
@@ -661,7 +661,7 @@ func TestGenerateWorkflowReportUsesDefaultBuiltInSemanticProvider(t *testing.T) 
 		},
 		Defaults: WorkflowDefaults{
 			SemanticDiff: WorkflowSemanticDiff{
-				Enabled:  boolPtr(true),
+				Enabled:  new(true),
 				Provider: "openai",
 				Model:    "gpt-test",
 				Run:      SemanticDiffRunAlways,
@@ -723,7 +723,7 @@ printf '{"summary":"Workflow codex ok","verdict":"no_meaningful_change","severit
 		},
 		Defaults: WorkflowDefaults{
 			SemanticDiff: WorkflowSemanticDiff{
-				Enabled:  boolPtr(true),
+				Enabled:  new(true),
 				Provider: "codex-cli",
 				Model:    "gpt-test",
 				Run:      SemanticDiffRunAlways,
@@ -777,7 +777,7 @@ func TestWorkflowSemanticDiffChangedOnlySkipsUnchanged(t *testing.T) {
 		},
 		Defaults: WorkflowDefaults{
 			SemanticDiff: WorkflowSemanticDiff{
-				Enabled:  boolPtr(true),
+				Enabled:  new(true),
 				Provider: "openai",
 				Run:      SemanticDiffRunChangedOnly,
 			},
@@ -827,7 +827,7 @@ func TestWorkflowSemanticDiffProviderFailureBecomesWarning(t *testing.T) {
 		},
 		Defaults: WorkflowDefaults{
 			SemanticDiff: WorkflowSemanticDiff{
-				Enabled:  boolPtr(true),
+				Enabled:  new(true),
 				Provider: "openai",
 				Run:      SemanticDiffRunAlways,
 			},
@@ -880,7 +880,7 @@ func TestWorkflowSemanticDiffRawResponseRequiresProcessEnablement(t *testing.T) 
 		},
 		Defaults: WorkflowDefaults{
 			SemanticDiff: WorkflowSemanticDiff{
-				Enabled:            boolPtr(true),
+				Enabled:            new(true),
 				Provider:           "openai",
 				Model:              "gpt-test",
 				Run:                SemanticDiffRunAlways,
@@ -931,7 +931,7 @@ func TestWorkflowSemanticDiffRejectsCredentialFields(t *testing.T) {
 		},
 		Defaults: WorkflowDefaults{
 			SemanticDiff: WorkflowSemanticDiff{
-				Enabled: boolPtr(true),
+				Enabled: new(true),
 				APIKey:  "secret",
 			},
 		},
@@ -959,8 +959,9 @@ func TestWorkflowSemanticDiffPolicyCanEscalate(t *testing.T) {
 	}
 }
 
+//go:fix inline
 func boolPtr(value bool) *bool {
-	return &value
+	return new(value)
 }
 
 func TestGenerateWorkflowReportRendersMultiScreenStoryComparison(t *testing.T) {

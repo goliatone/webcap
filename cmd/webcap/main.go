@@ -62,6 +62,7 @@ func runSkill(ctx context.Context, invocation cliInvocation) error {
 			SkillName: webcapAgentSkillName,
 			Source:    skillSourceFS(),
 			SourceDir: webcapAgentSkillName,
+			Force:     invocation.Skill.Force,
 		},
 	})
 	if err != nil {
@@ -329,7 +330,7 @@ Usage:
   webcap workflow capture-scenario [flags] <scenario-path>
   webcap report scenario <scenario-path>
   webcap mcp serve [flags]
-  webcap skill install --agent <codex|claude>
+  webcap skill install --agent <codex|claude> [--force]
 
 Commands:
   help                         Show this help message.

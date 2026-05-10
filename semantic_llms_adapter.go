@@ -2,6 +2,7 @@ package webcap
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/goliatone/webcap/pkg/llms"
@@ -55,6 +56,10 @@ func (p *llmsSemanticDiffProvider) CompareImages(ctx context.Context, req Semant
 func mapLLMSError(err error) error {
 	if err == nil {
 		return nil
+	}
+	var executionErr *llms.ExecutionError
+	if errors.As(err, &executionErr) && (executionErr.TimedOut || executionErr.Cancelled) {
+		return newCaptureError(CodeTimeout, "semantic_llms_provider", "capture timed out", err)
 	}
 	message := strings.ToLower(strings.TrimSpace(err.Error()))
 	switch {

@@ -68,7 +68,7 @@ type SemanticDiffRequest struct {
 	Prompt             string               `json:"prompt,omitempty" yaml:"prompt,omitempty"`
 	PromptPath         string               `json:"prompt_path,omitempty" yaml:"prompt_path,omitempty"`
 	Focus              []string             `json:"focus,omitempty" yaml:"focus,omitempty"`
-	PixelContext       SemanticPixelContext `json:"pixel_context,omitempty" yaml:"pixel_context,omitempty"`
+	PixelContext       SemanticPixelContext `json:"pixel_context" yaml:"pixel_context,omitempty"`
 	MetadataPath       string               `json:"metadata_path,omitempty" yaml:"metadata_path,omitempty"`
 	RawResponsePath    string               `json:"raw_response_path,omitempty" yaml:"raw_response_path,omitempty"`
 	Timeout            string               `json:"timeout,omitempty" yaml:"timeout,omitempty"`
@@ -111,12 +111,12 @@ type SemanticDiffResult struct {
 	Verdict          SemanticDiffVerdict    `json:"verdict"`
 	Severity         SemanticDiffSeverity   `json:"severity"`
 	Prompt           SemanticPromptMetadata `json:"prompt"`
-	PixelContext     SemanticPixelContext   `json:"pixel_context,omitempty"`
+	PixelContext     SemanticPixelContext   `json:"pixel_context"`
 	MetadataPath     string                 `json:"metadata_path,omitempty"`
 	RawResponsePath  string                 `json:"raw_response_path,omitempty"`
 	Warnings         []CaptureWarning       `json:"warnings,omitempty"`
 	ProviderMetadata map[string]string      `json:"provider_metadata,omitempty"`
-	Usage            SemanticProviderUsage  `json:"usage,omitempty"`
+	Usage            SemanticProviderUsage  `json:"usage"`
 	StartedAt        time.Time              `json:"started_at"`
 	CompletedAt      time.Time              `json:"completed_at"`
 	Duration         string                 `json:"duration,omitempty"`

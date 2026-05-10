@@ -2,6 +2,7 @@ package webcap
 
 import (
 	"context"
+	"maps"
 	"net/http"
 	"os"
 	"strings"
@@ -61,15 +62,19 @@ func (opts SemanticDiffOptions) normalized() SemanticDiffOptions {
 		out.HTTPClient = http.DefaultClient
 	}
 	out.DefaultModels = cloneStringMap(out.DefaultModels)
-	out.Providers = cloneSemanticProviderMap(out.Providers)
-	out.Providers = withBuiltinSemanticProviders(out)
+	rootProviders := cloneSemanticProviderMap(out.Providers)
+	out.LLMs = withBuiltinLLMSProviders(out)
+	out.Providers = adaptLLMProviders(out.LLMs.Providers)
+	maps.Copy(out.Providers, rootProviders)
 	return out
 }
 
-func withBuiltinSemanticProviders(opts SemanticDiffOptions) map[string]SemanticDiffProvider {
-	providers := cloneSemanticProviderMap(opts.Providers)
-	if providers["openai"] == nil {
-		openAIOptions := opts.LLMs.OpenAI
+func withBuiltinLLMSProviders(opts SemanticDiffOptions) llms.Options {
+	llmOptions := opts.LLMs
+	llmOptions.Providers = llms.CloneProviders(llmOptions.Providers)
+	llmOptions.DefaultMap = llms.CloneStringMap(llmOptions.DefaultMap)
+	if llmOptions.Providers["openai"] == nil {
+		openAIOptions := llmOptions.OpenAI
 		if openAIOptions.CredentialResolver == nil {
 			openAIOptions.CredentialResolver = llmsCredentialResolver(opts.CredentialResolver)
 		}
@@ -79,14 +84,11 @@ func withBuiltinSemanticProviders(opts SemanticDiffOptions) map[string]SemanticD
 		if openAIOptions.BaseURL == "" {
 			openAIOptions.BaseURL = opts.OpenAIBaseURL
 		}
-		providers["openai"] = NewOpenAISemanticDiffProvider(OpenAISemanticProviderOptions{
-			CredentialResolver: semanticCredentialResolver(openAIOptions.CredentialResolver),
-			HTTPClient:         openAIOptions.HTTPClient,
-			BaseURL:            openAIOptions.BaseURL,
-		})
+		llmOptions.OpenAI = openAIOptions
+		llmOptions.Providers["openai"] = llms.NewOpenAIProvider(openAIOptions)
 	}
-	if providers["anthropic"] == nil {
-		anthropicOptions := opts.LLMs.Anthropic
+	if llmOptions.Providers["anthropic"] == nil {
+		anthropicOptions := llmOptions.Anthropic
 		if anthropicOptions.CredentialResolver == nil {
 			anthropicOptions.CredentialResolver = llmsCredentialResolver(opts.CredentialResolver)
 		}
@@ -96,25 +98,21 @@ func withBuiltinSemanticProviders(opts SemanticDiffOptions) map[string]SemanticD
 		if anthropicOptions.BaseURL == "" {
 			anthropicOptions.BaseURL = opts.AnthropicBaseURL
 		}
-		providers["anthropic"] = NewAnthropicSemanticDiffProvider(AnthropicSemanticProviderOptions{
-			CredentialResolver: semanticCredentialResolver(anthropicOptions.CredentialResolver),
-			HTTPClient:         anthropicOptions.HTTPClient,
-			BaseURL:            anthropicOptions.BaseURL,
-		})
+		llmOptions.Anthropic = anthropicOptions
+		llmOptions.Providers["anthropic"] = llms.NewAnthropicProvider(anthropicOptions)
 	}
-	if providers["codex-cli"] == nil {
-		providers["codex-cli"] = NewLLMSSemanticDiffProvider(llms.NewCodexCLIProvider(opts.LLMs.CodexCLI))
+	if llmOptions.Providers["codex-cli"] == nil {
+		llmOptions.Providers["codex-cli"] = llms.NewCodexCLIProvider(llmOptions.CodexCLI)
 	}
-	return providers
+	return llmOptions
 }
 
-func semanticCredentialResolver(resolver llms.CredentialResolver) SemanticCredentialResolver {
-	if resolver == nil {
-		return nil
+func adaptLLMProviders(values map[string]llms.Provider) map[string]SemanticDiffProvider {
+	providers := map[string]SemanticDiffProvider{}
+	for name, provider := range llms.CloneProviders(values) {
+		providers[name] = NewLLMSSemanticDiffProvider(provider)
 	}
-	return func(ctx context.Context, provider string) (string, error) {
-		return resolver(ctx, provider)
-	}
+	return providers
 }
 
 func cloneSemanticProviderMap(values map[string]SemanticDiffProvider) map[string]SemanticDiffProvider {

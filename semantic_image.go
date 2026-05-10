@@ -3,6 +3,7 @@ package webcap
 import (
 	"encoding/base64"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -39,7 +40,7 @@ func prepareSemanticImagePayload(path, role string, maxBytes int64) (SemanticIma
 	if err != nil {
 		return SemanticImagePayload{}, err
 	}
-	payload, err := os.ReadFile(path)
+	payload, err := readSemanticImageFile(path)
 	if err != nil {
 		return SemanticImagePayload{}, wrapCaptureError("read_semantic_image", err)
 	}
@@ -55,6 +56,33 @@ func prepareSemanticImagePayload(path, role string, maxBytes int64) (SemanticIma
 		Base64Data: base64.StdEncoding.EncodeToString(payload),
 		ByteSize:   int64(len(payload)),
 	}, nil
+}
+
+func readSemanticImageFile(path string) ([]byte, error) {
+	root, name, err := openPathRoot(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = root.Close()
+	}()
+	file, err := root.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = file.Close()
+	}()
+	return io.ReadAll(file)
+}
+
+func openPathRoot(path string) (*os.Root, string, error) {
+	path = filepath.Clean(path)
+	root, err := os.OpenRoot(filepath.Dir(path))
+	if err != nil {
+		return nil, "", err
+	}
+	return root, filepath.Base(path), nil
 }
 
 func semanticImageMIMEType(path string) (string, error) {

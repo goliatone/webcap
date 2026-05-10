@@ -1,14 +1,13 @@
 package webcap
 
 import (
-	"bytes"
 	"context"
-	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/goliatone/webcap/pkg/llms"
 )
 
 type SemanticCredentialResolver func(ctx context.Context, provider string) (string, error)
@@ -70,20 +69,52 @@ func (opts SemanticDiffOptions) normalized() SemanticDiffOptions {
 func withBuiltinSemanticProviders(opts SemanticDiffOptions) map[string]SemanticDiffProvider {
 	providers := cloneSemanticProviderMap(opts.Providers)
 	if providers["openai"] == nil {
+		openAIOptions := opts.LLMs.OpenAI
+		if openAIOptions.CredentialResolver == nil {
+			openAIOptions.CredentialResolver = llmsCredentialResolver(opts.CredentialResolver)
+		}
+		if openAIOptions.HTTPClient == nil {
+			openAIOptions.HTTPClient = opts.HTTPClient
+		}
+		if openAIOptions.BaseURL == "" {
+			openAIOptions.BaseURL = opts.OpenAIBaseURL
+		}
 		providers["openai"] = NewOpenAISemanticDiffProvider(OpenAISemanticProviderOptions{
-			CredentialResolver: opts.CredentialResolver,
-			HTTPClient:         opts.HTTPClient,
-			BaseURL:            opts.OpenAIBaseURL,
+			CredentialResolver: semanticCredentialResolver(openAIOptions.CredentialResolver),
+			HTTPClient:         openAIOptions.HTTPClient,
+			BaseURL:            openAIOptions.BaseURL,
 		})
 	}
 	if providers["anthropic"] == nil {
+		anthropicOptions := opts.LLMs.Anthropic
+		if anthropicOptions.CredentialResolver == nil {
+			anthropicOptions.CredentialResolver = llmsCredentialResolver(opts.CredentialResolver)
+		}
+		if anthropicOptions.HTTPClient == nil {
+			anthropicOptions.HTTPClient = opts.HTTPClient
+		}
+		if anthropicOptions.BaseURL == "" {
+			anthropicOptions.BaseURL = opts.AnthropicBaseURL
+		}
 		providers["anthropic"] = NewAnthropicSemanticDiffProvider(AnthropicSemanticProviderOptions{
-			CredentialResolver: opts.CredentialResolver,
-			HTTPClient:         opts.HTTPClient,
-			BaseURL:            opts.AnthropicBaseURL,
+			CredentialResolver: semanticCredentialResolver(anthropicOptions.CredentialResolver),
+			HTTPClient:         anthropicOptions.HTTPClient,
+			BaseURL:            anthropicOptions.BaseURL,
 		})
 	}
+	if providers["codex-cli"] == nil {
+		providers["codex-cli"] = NewLLMSSemanticDiffProvider(llms.NewCodexCLIProvider(opts.LLMs.CodexCLI))
+	}
 	return providers
+}
+
+func semanticCredentialResolver(resolver llms.CredentialResolver) SemanticCredentialResolver {
+	if resolver == nil {
+		return nil
+	}
+	return func(ctx context.Context, provider string) (string, error) {
+		return resolver(ctx, provider)
+	}
 }
 
 func cloneSemanticProviderMap(values map[string]SemanticDiffProvider) map[string]SemanticDiffProvider {
@@ -120,53 +151,4 @@ func SemanticEnvironmentCredentialResolver(_ context.Context, provider string) (
 	default:
 		return "", nil
 	}
-}
-
-func semanticCredential(ctx context.Context, resolver SemanticCredentialResolver, provider string) (string, error) {
-	if resolver == nil {
-		resolver = SemanticEnvironmentCredentialResolver
-	}
-	key, err := resolver(ctx, provider)
-	if err != nil {
-		return "", wrapCaptureError("resolve_semantic_provider_credentials", err)
-	}
-	key = strings.TrimSpace(key)
-	if key == "" {
-		return "", newCaptureError(CodeValidation, "resolve_semantic_provider_credentials", fmt.Sprintf("%s API key is required", normalizeSemanticProviderName(provider)), nil)
-	}
-	return key, nil
-}
-
-func semanticHTTPClient(client *http.Client) *http.Client {
-	if client != nil {
-		return client
-	}
-	return http.DefaultClient
-}
-
-func postSemanticJSON(ctx context.Context, client *http.Client, url, apiKey string, headers map[string]string, body []byte) ([]byte, int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return nil, 0, wrapCaptureError("semantic_provider_request", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	for key, value := range headers {
-		req.Header.Set(key, value)
-	}
-	if apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+apiKey)
-	}
-	resp, err := semanticHTTPClient(client).Do(req)
-	if err != nil {
-		return nil, 0, wrapCaptureError("semantic_provider_http", err)
-	}
-	defer resp.Body.Close()
-	payload, readErr := io.ReadAll(resp.Body)
-	if readErr != nil {
-		return nil, resp.StatusCode, wrapCaptureError("semantic_provider_http", readErr)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, resp.StatusCode, newCaptureError(CodeCapture, "semantic_provider_http", fmt.Sprintf("semantic provider returned HTTP %d", resp.StatusCode), nil)
-	}
-	return payload, resp.StatusCode, nil
 }

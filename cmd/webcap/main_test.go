@@ -139,6 +139,64 @@ func TestRunSkillInstallUsesEmbeddedAssets(t *testing.T) {
 	}
 }
 
+func TestRunSkillInstallRejectsConflictUnlessForced(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	destination := filepath.Join(home, ".agents", "skills", "webcap-agent")
+
+	invocation, err := parseCLI([]string{"skill", "install", "--agent", "codex"})
+	if err != nil {
+		t.Fatalf("parseCLI returned error: %v", err)
+	}
+	var runErr error
+	_ = captureStdout(t, func() {
+		runErr = run(context.Background(), invocation)
+	})
+	if runErr != nil {
+		t.Fatalf("initial run returned error: %v", runErr)
+	}
+
+	skillPath := filepath.Join(destination, "SKILL.md")
+	if err := os.WriteFile(skillPath, []byte("# User edit\n"), 0o644); err != nil {
+		t.Fatalf("write conflicting skill: %v", err)
+	}
+
+	_ = captureStdout(t, func() {
+		runErr = run(context.Background(), invocation)
+	})
+	if runErr == nil || !strings.Contains(runErr.Error(), "--force") {
+		t.Fatalf("expected conflict error mentioning --force, got %v", runErr)
+	}
+	got, err := os.ReadFile(skillPath)
+	if err != nil {
+		t.Fatalf("read conflicting skill: %v", err)
+	}
+	if string(got) != "# User edit\n" {
+		t.Fatalf("conflict install changed existing file: %q", got)
+	}
+
+	forced, err := parseCLI([]string{"skill", "install", "--agent", "codex", "--force"})
+	if err != nil {
+		t.Fatalf("parseCLI returned error: %v", err)
+	}
+	output := captureStdout(t, func() {
+		runErr = run(context.Background(), forced)
+	})
+	if runErr != nil {
+		t.Fatalf("forced run returned error: %v", runErr)
+	}
+	if !strings.Contains(output, `"files_written":`) {
+		t.Fatalf("expected forced install output to include files_written, got:\n%s", output)
+	}
+	got, err = os.ReadFile(skillPath)
+	if err != nil {
+		t.Fatalf("read forced skill: %v", err)
+	}
+	if string(got) == "# User edit\n" {
+		t.Fatal("forced install did not replace conflicting file")
+	}
+}
+
 func TestRunSemanticDiffUsesDefaultBuiltInProvider(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer test-key" {

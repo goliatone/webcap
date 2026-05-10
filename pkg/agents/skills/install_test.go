@@ -2,6 +2,8 @@ package skills
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -74,7 +76,62 @@ func TestInstallCopiesNestedFilesAndIsIdempotent(t *testing.T) {
 	if second.Destination != first.Destination {
 		t.Fatalf("repeat install changed destination: %q != %q", second.Destination, first.Destination)
 	}
+	if second.FilesWritten != 0 {
+		t.Fatalf("repeat install rewrote unchanged files: %d", second.FilesWritten)
+	}
 	assertFileContent(t, filepath.Join(second.Destination, "SKILL.md"), "---\nname: webcap-agent\n---\n")
+}
+
+func TestInstallRejectsConflictingExistingFilesByDefault(t *testing.T) {
+	destination := filepath.Join(t.TempDir(), "webcap-agent")
+	if err := os.MkdirAll(destination, 0o755); err != nil {
+		t.Fatalf("create destination: %v", err)
+	}
+	target := filepath.Join(destination, "SKILL.md")
+	if err := os.WriteFile(target, []byte("# User edit\n"), 0o644); err != nil {
+		t.Fatalf("write existing target: %v", err)
+	}
+
+	_, err := Install(context.Background(), InstallRequest{
+		Agent:       AgentCodex,
+		SkillName:   "webcap-agent",
+		Source:      validSource(),
+		Destination: destination,
+	})
+	if err == nil {
+		t.Fatal("expected conflict error")
+	}
+	var conflict ConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("expected ConflictError, got %T %v", err, err)
+	}
+	assertFileContent(t, target, "# User edit\n")
+}
+
+func TestInstallForceReplacesConflictingExistingFiles(t *testing.T) {
+	destination := filepath.Join(t.TempDir(), "webcap-agent")
+	if err := os.MkdirAll(destination, 0o755); err != nil {
+		t.Fatalf("create destination: %v", err)
+	}
+	target := filepath.Join(destination, "SKILL.md")
+	if err := os.WriteFile(target, []byte("# User edit\n"), 0o644); err != nil {
+		t.Fatalf("write existing target: %v", err)
+	}
+
+	result, err := Install(context.Background(), InstallRequest{
+		Agent:       AgentClaude,
+		SkillName:   "webcap-agent",
+		Source:      validSource(),
+		Destination: destination,
+		Force:       true,
+	})
+	if err != nil {
+		t.Fatalf("Install returned error: %v", err)
+	}
+	if result.FilesWritten != 1 {
+		t.Fatalf("unexpected files written: %d", result.FilesWritten)
+	}
+	assertFileContent(t, target, "# Skill\n")
 }
 
 func TestInstallUsesExplicitDestination(t *testing.T) {
@@ -117,6 +174,34 @@ func TestInstallRejectsMissingSkillMarkdown(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "SKILL.md") {
 		t.Fatalf("expected missing SKILL.md error, got %v", err)
+	}
+}
+
+func TestInstallRejectsDirectorySkillMarkdown(t *testing.T) {
+	_, err := Install(context.Background(), InstallRequest{
+		Agent:     AgentCodex,
+		SkillName: "webcap-agent",
+		Source: fstest.MapFS{
+			"SKILL.md": {Mode: fs.ModeDir},
+		},
+		HomeDir: t.TempDir(),
+	})
+	if err == nil || !strings.Contains(err.Error(), "directory SKILL.md") {
+		t.Fatalf("expected directory SKILL.md error, got %v", err)
+	}
+}
+
+func TestInstallRejectsNonRegularSkillMarkdown(t *testing.T) {
+	_, err := Install(context.Background(), InstallRequest{
+		Agent:     AgentCodex,
+		SkillName: "webcap-agent",
+		Source: fstest.MapFS{
+			"SKILL.md": {Data: []byte("# Skill\n"), Mode: fs.ModeIrregular},
+		},
+		HomeDir: t.TempDir(),
+	})
+	if err == nil || !strings.Contains(err.Error(), "non-regular SKILL.md") {
+		t.Fatalf("expected non-regular SKILL.md error, got %v", err)
 	}
 }
 

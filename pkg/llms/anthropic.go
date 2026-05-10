@@ -3,6 +3,7 @@ package llms
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 )
@@ -105,9 +106,14 @@ func ParseAnthropicResponse(payload []byte) (string, string, Usage, error) {
 			}
 		}
 	}
-	return strings.Join(parts, "\n"), body.Model, Usage{
+	usage := Usage{
 		InputTokens:  body.Usage.InputTokens,
 		OutputTokens: body.Usage.OutputTokens,
 		TotalTokens:  body.Usage.InputTokens + body.Usage.OutputTokens,
-	}, nil
+	}
+	text := strings.Join(parts, "\n")
+	if text == "" {
+		return "", body.Model, usage, errors.New("anthropic response contained no text")
+	}
+	return text, body.Model, usage, nil
 }

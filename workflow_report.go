@@ -1677,10 +1677,8 @@ func workflowSemanticDiffFailsPolicy(config WorkflowSemanticDiff, result Semanti
 	if config.AdvisoryPolicy != SemanticDiffAdvisoryEnforce {
 		return false
 	}
-	for _, verdict := range config.FailureVerdicts {
-		if result.Verdict == verdict {
-			return true
-		}
+	if slices.Contains(config.FailureVerdicts, result.Verdict) {
+		return true
 	}
 	if config.FailureSeverity == "" {
 		return false

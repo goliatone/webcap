@@ -94,7 +94,7 @@ type WorkflowDefaults struct {
 	ViewportPreset    string               `json:"viewport_preset,omitempty" yaml:"viewport_preset,omitempty"`
 	DevicePreset      string               `json:"device_preset,omitempty" yaml:"device_preset,omitempty"`
 	Comparison        WorkflowComparison   `json:"comparison" yaml:"comparison,omitempty"`
-	SemanticDiff      WorkflowSemanticDiff `json:"semantic_diff,omitempty" yaml:"semantic_diff,omitempty"`
+	SemanticDiff      WorkflowSemanticDiff `json:"semantic_diff" yaml:"semantic_diff,omitempty"`
 	Readiness         ReadinessMode        `json:"readiness,omitempty" yaml:"readiness,omitempty"`
 	ReadinessIdle     string               `json:"readiness_idle,omitempty" yaml:"readiness_idle,omitempty"`
 	DisableAnimations bool                 `json:"disable_animations,omitempty" yaml:"disable_animations,omitempty"`
@@ -135,7 +135,7 @@ type WorkflowScreen struct {
 	Query             map[string]string      `json:"query,omitempty" yaml:"query,omitempty"`
 	OutputName        string                 `json:"output_name,omitempty" yaml:"output_name,omitempty"`
 	Comparison        WorkflowComparison     `json:"comparison" yaml:"comparison,omitempty"`
-	SemanticDiff      WorkflowSemanticDiff   `json:"semantic_diff,omitempty" yaml:"semantic_diff,omitempty"`
+	SemanticDiff      WorkflowSemanticDiff   `json:"semantic_diff" yaml:"semantic_diff,omitempty"`
 	ReferenceImage    string                 `json:"reference_image" yaml:"reference_image"`
 	PrimaryStories    []string               `json:"primary_stories,omitempty" yaml:"primary_stories,omitempty"`
 	SupportingStories []string               `json:"supporting_stories,omitempty" yaml:"supporting_stories,omitempty"`

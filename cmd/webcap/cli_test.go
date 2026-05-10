@@ -323,6 +323,16 @@ func TestParseSkillInstallCLI(t *testing.T) {
 	}
 }
 
+func TestParseSkillInstallCLIWithForce(t *testing.T) {
+	invocation, err := parseCLI([]string{"skill", "install", "--agent", "codex", "--force"})
+	if err != nil {
+		t.Fatalf("parseCLI returned error: %v", err)
+	}
+	if !invocation.Skill.Force {
+		t.Fatal("expected force option to be enabled")
+	}
+}
+
 func TestParseSkillInstallCLIRejectsMissingAgent(t *testing.T) {
 	if _, err := parseCLI([]string{"skill", "install"}); err == nil {
 		t.Fatal("expected missing agent to be rejected")

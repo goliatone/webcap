@@ -2,6 +2,7 @@ package webcap
 
 import (
 	"context"
+	"errors"
 	"image/color"
 	"io"
 	"net/http"
@@ -24,12 +25,16 @@ type recordingLLMSProvider struct {
 	name    string
 	lastReq llms.Request
 	resp    llms.Response
+	err     error
 }
 
 func (p *recordingLLMSProvider) Name() string { return p.name }
 
 func (p *recordingLLMSProvider) CompareImages(_ context.Context, req llms.Request) (llms.Response, error) {
 	p.lastReq = req
+	if p.err != nil {
+		return llms.Response{}, p.err
+	}
 	return p.resp, nil
 }
 
@@ -66,6 +71,23 @@ func TestLLMSSemanticDiffProviderAdaptsRequestAndResponse(t *testing.T) {
 	}
 	if resp.Provider != "codex-cli" || resp.Model != "gpt-test" || resp.Usage.TotalTokens != 3 || resp.Warnings[0].Code != "stderr" {
 		t.Fatalf("unexpected adapted response: %#v", resp)
+	}
+}
+
+func TestLLMSSemanticDiffProviderMapsExecutionTimeout(t *testing.T) {
+	adapter := NewLLMSSemanticDiffProvider(&recordingLLMSProvider{
+		name: "codex-cli",
+		err: &llms.ExecutionError{
+			Provider: "codex-cli",
+			Command:  "codex",
+			TimedOut: true,
+			Err:      context.DeadlineExceeded,
+		},
+	})
+	_, err := adapter.CompareImages(context.Background(), SemanticProviderRequest{Provider: "codex-cli"})
+	var captureErr *Error
+	if !errors.As(err, &captureErr) || captureErr.Code != CodeTimeout {
+		t.Fatalf("expected timeout capture error, got %v %#v", err, captureErr)
 	}
 }
 
@@ -220,6 +242,78 @@ func TestSemanticDiffOptionsCallerProviderOverridesBuiltIn(t *testing.T) {
 	}
 	if provider.lastReq.Provider != "openai" || result.Provider != "custom-openai" || result.Summary != "custom provider" {
 		t.Fatalf("caller provider was not used: req=%#v result=%#v", provider.lastReq, result)
+	}
+}
+
+func TestSemanticDiffOptionsRegistersCallerLLMSProvider(t *testing.T) {
+	dir := t.TempDir()
+	currentPath := filepath.Join(dir, "current.png")
+	referencePath := filepath.Join(dir, "reference.png")
+	if err := writeTestPNG(currentPath, []color.NRGBA{{R: 255, A: 255}}); err != nil {
+		t.Fatalf("write current: %v", err)
+	}
+	if err := writeTestPNG(referencePath, []color.NRGBA{{B: 255, A: 255}}); err != nil {
+		t.Fatalf("write reference: %v", err)
+	}
+
+	provider := &recordingLLMSProvider{name: "local-fake", resp: llms.Response{
+		Provider: "local-fake",
+		Model:    "agent-model",
+		RawText:  `{"summary":"registered llm provider","verdict":"no_meaningful_change","severity":"info"}`,
+	}}
+	service := NewServiceWithOptions(nil, Options{SemanticDiff: SemanticDiffOptions{
+		LLMs: llms.Options{Providers: map[string]llms.Provider{" LOCAL-FAKE ": provider}},
+	}})
+
+	result, err := service.SemanticDiff(context.Background(), SemanticDiffRequest{
+		CurrentPath:   currentPath,
+		ReferencePath: referencePath,
+		Provider:      "local-fake",
+		MetadataPath:  filepath.Join(dir, "semantic.json"),
+	})
+	if err != nil {
+		t.Fatalf("SemanticDiff returned error: %v", err)
+	}
+	if provider.lastReq.Provider != "local-fake" || result.Provider != "local-fake" || result.Summary != "registered llm provider" {
+		t.Fatalf("LLMs provider was not used: req=%#v result=%#v", provider.lastReq, result)
+	}
+}
+
+func TestSemanticDiffOptionsRootProviderOverridesLLMSProvider(t *testing.T) {
+	dir := t.TempDir()
+	currentPath := filepath.Join(dir, "current.png")
+	referencePath := filepath.Join(dir, "reference.png")
+	if err := writeTestPNG(currentPath, []color.NRGBA{{R: 255, A: 255}}); err != nil {
+		t.Fatalf("write current: %v", err)
+	}
+	if err := writeTestPNG(referencePath, []color.NRGBA{{B: 255, A: 255}}); err != nil {
+		t.Fatalf("write reference: %v", err)
+	}
+
+	llmProvider := &recordingLLMSProvider{name: "hybrid", resp: llms.Response{
+		Provider: "hybrid",
+		RawText:  `{"summary":"llms provider","verdict":"no_meaningful_change","severity":"info"}`,
+	}}
+	rootProvider := &fakeSemanticProvider{name: "hybrid", resp: SemanticProviderResponse{
+		Provider: "hybrid",
+		RawText:  `{"summary":"root provider","verdict":"needs_review","severity":"minor"}`,
+	}}
+	service := NewServiceWithOptions(nil, Options{SemanticDiff: SemanticDiffOptions{
+		LLMs:      llms.Options{Providers: map[string]llms.Provider{"hybrid": llmProvider}},
+		Providers: map[string]SemanticDiffProvider{"hybrid": rootProvider},
+	}})
+
+	result, err := service.SemanticDiff(context.Background(), SemanticDiffRequest{
+		CurrentPath:   currentPath,
+		ReferencePath: referencePath,
+		Provider:      "hybrid",
+		MetadataPath:  filepath.Join(dir, "semantic.json"),
+	})
+	if err != nil {
+		t.Fatalf("SemanticDiff returned error: %v", err)
+	}
+	if llmProvider.lastReq.Provider != "" || rootProvider.lastReq.Provider != "hybrid" || result.Summary != "root provider" {
+		t.Fatalf("root provider did not override LLM provider: llm=%#v root=%#v result=%#v", llmProvider.lastReq, rootProvider.lastReq, result)
 	}
 }
 

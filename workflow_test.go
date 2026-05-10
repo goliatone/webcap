@@ -959,11 +959,6 @@ func TestWorkflowSemanticDiffPolicyCanEscalate(t *testing.T) {
 	}
 }
 
-//go:fix inline
-func boolPtr(value bool) *bool {
-	return new(value)
-}
-
 func TestGenerateWorkflowReportRendersMultiScreenStoryComparison(t *testing.T) {
 	tempDir := t.TempDir()
 	patientReferencePath := filepath.Join(tempDir, "patient-reference.png")

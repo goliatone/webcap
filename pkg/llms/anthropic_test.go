@@ -61,3 +61,33 @@ func TestAnthropicProviderUsesHTTPTransport(t *testing.T) {
 		t.Fatalf("unexpected provider response/auth: key=%v resp=%#v", sawKey, resp)
 	}
 }
+
+func TestAnthropicProviderRejectsMalformedResponse(t *testing.T) {
+	provider := NewAnthropicProvider(AnthropicOptions{
+		CredentialResolver: func(context.Context, string) (string, error) { return "test-key", nil },
+		HTTPClient:         staticHTTPClient(200, `{`),
+	})
+	if _, err := provider.CompareImages(context.Background(), Request{Model: "claude-test", Prompt: "Compare"}); err == nil {
+		t.Fatal("expected malformed response error")
+	}
+}
+
+func TestAnthropicProviderRejectsEmptyTextResponse(t *testing.T) {
+	provider := NewAnthropicProvider(AnthropicOptions{
+		CredentialResolver: func(context.Context, string) (string, error) { return "test-key", nil },
+		HTTPClient:         staticHTTPClient(200, `{"model":"claude-test","content":[{"type":"text","text":"   "}],"usage":{"input_tokens":1,"output_tokens":2}}`),
+	})
+	if _, err := provider.CompareImages(context.Background(), Request{Model: "claude-test", Prompt: "Compare"}); err == nil || !strings.Contains(err.Error(), "no text") {
+		t.Fatalf("expected empty text response error, got %v", err)
+	}
+}
+
+func TestAnthropicProviderReportsHTTPError(t *testing.T) {
+	provider := NewAnthropicProvider(AnthropicOptions{
+		CredentialResolver: func(context.Context, string) (string, error) { return "test-key", nil },
+		HTTPClient:         staticHTTPClient(429, `{"error":"rate limited"}`),
+	})
+	if _, err := provider.CompareImages(context.Background(), Request{Model: "claude-test", Prompt: "Compare"}); err == nil || !strings.Contains(err.Error(), "HTTP 429") {
+		t.Fatalf("expected HTTP status error, got %v", err)
+	}
+}

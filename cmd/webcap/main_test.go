@@ -315,9 +315,12 @@ func writeMainTestPNG(t *testing.T, path string, c color.NRGBA) {
 	if err != nil {
 		t.Fatalf("create image: %v", err)
 	}
-	defer file.Close()
 	if err := png.Encode(file, img); err != nil {
+		_ = file.Close()
 		t.Fatalf("encode image: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close image: %v", err)
 	}
 }
 

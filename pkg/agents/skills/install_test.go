@@ -47,6 +47,7 @@ func TestInstallCopiesNestedFilesAndIsIdempotent(t *testing.T) {
 	home := t.TempDir()
 	source := fstest.MapFS{
 		"bundle/SKILL.md":                    {Data: []byte("---\nname: webcap-agent\n---\n")},
+		"bundle/references/empty":            {Mode: fs.ModeDir},
 		"bundle/references/visual-review.md": {Data: []byte("# Visual review\n")},
 		"bundle/scripts/run.sh":              {Data: []byte("#!/bin/sh\n"), Mode: 0o755},
 	}
@@ -67,6 +68,7 @@ func TestInstallCopiesNestedFilesAndIsIdempotent(t *testing.T) {
 	}
 	assertFileContent(t, filepath.Join(first.Destination, "SKILL.md"), "---\nname: webcap-agent\n---\n")
 	assertFileContent(t, filepath.Join(first.Destination, "references", "visual-review.md"), "# Visual review\n")
+	assertDirectory(t, filepath.Join(first.Destination, "references", "empty"))
 	assertExecutableBit(t, filepath.Join(first.Destination, "scripts", "run.sh"))
 
 	second, err := Install(context.Background(), req)
@@ -233,6 +235,17 @@ func assertFileContent(t *testing.T, path, want string) {
 	}
 	if string(got) != want {
 		t.Fatalf("unexpected content for %s: got %q want %q", path, got, want)
+	}
+}
+
+func assertDirectory(t *testing.T, path string) {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat directory %s: %v", path, err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("expected directory %s, got mode %s", path, info.Mode())
 	}
 }
 

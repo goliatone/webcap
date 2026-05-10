@@ -86,6 +86,7 @@ type mcpOptions struct {
 type skillOptions struct {
 	Action string
 	Agent  skills.Agent
+	Force  bool
 }
 
 func parseCLI(args []string) (cliInvocation, error) {
@@ -361,6 +362,7 @@ func parseSkillInstallCLI(args []string) (cliInvocation, error) {
 	fs := flag.NewFlagSet("webcap skill install", flag.ContinueOnError)
 	fs.SetOutput(&stderr)
 	fs.StringVar(&agent, "agent", "", "Agent to install for: codex or claude.")
+	fs.BoolVar(&invocation.Skill.Force, "force", false, "Replace conflicting installed skill files.")
 	if err := fs.Parse(args); err != nil {
 		message := strings.TrimSpace(stderr.String())
 		if message == "" {

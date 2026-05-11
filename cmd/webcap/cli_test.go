@@ -52,6 +52,32 @@ func TestParseShotCLIDefaultsPageCaptureToFullPage(t *testing.T) {
 	}
 }
 
+func TestParseShotCLITileFlags(t *testing.T) {
+	invocation, err := parseCLI([]string{
+		"shot",
+		"--oversize", "tile",
+		"--tile-max-width", "4096",
+		"--tile-max-height", "2048",
+		"--tile-max-pixels", "123456",
+		"--tile-max-target-pixels", "654321",
+		"--tile-overlap", "16",
+		"--tile-stitch",
+		"--tile-max-stitched-pixels", "777777",
+		"--tile-cleanup",
+		"http://localhost:3000",
+	})
+	if err != nil {
+		t.Fatalf("parseCLI returned error: %v", err)
+	}
+	req := invocation.Shot.Request
+	if req.OversizePolicy != pkgwebcap.OversizePolicyTile {
+		t.Fatalf("unexpected oversize policy: %s", req.OversizePolicy)
+	}
+	if req.Tile.MaxWidth != 4096 || req.Tile.MaxHeight != 2048 || req.Tile.MaxPixels != 123456 || req.Tile.MaxTargetPixels != 654321 || req.Tile.Overlap != 16 || !req.Tile.Stitch || req.Tile.MaxStitchedPixels != 777777 || !req.Tile.CleanupTiles {
+		t.Fatalf("unexpected tile options: %+v", req.Tile)
+	}
+}
+
 func TestParseShotCLIVisibleCapture(t *testing.T) {
 	invocation, err := parseCLI([]string{"shot", "--visible", "http://localhost:3000"})
 	if err != nil {

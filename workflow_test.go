@@ -435,6 +435,113 @@ func TestGenerateWorkflowReportWritesArtifacts(t *testing.T) {
 	}
 }
 
+func TestGenerateWorkflowReportLinksUnstitchedTiledArtifacts(t *testing.T) {
+	tempDir := t.TempDir()
+	referencePath := filepath.Join(tempDir, "reference.png")
+	currentPath := filepath.Join(tempDir, "artifacts", "current", "patient.png")
+	metadataPath := currentPath + ".json"
+	tilePath := filepath.Join(tempDir, "artifacts", "current", "patient.tile-0000.png")
+	if err := writeTestPNG(referencePath, []color.NRGBA{{R: 255, G: 255, B: 255, A: 255}}); err != nil {
+		t.Fatalf("writeTestPNG reference: %v", err)
+	}
+	if err := writeTestPNG(tilePath, []color.NRGBA{{R: 200, G: 200, B: 200, A: 255}}); err != nil {
+		t.Fatalf("writeTestPNG tile: %v", err)
+	}
+	captureMetadata := CaptureResult{
+		OutputPath:   currentPath,
+		MetadataPath: metadataPath,
+		Tiling: &CaptureTiling{
+			Status:         CaptureTilingComplete,
+			TargetBounds:   Bounds{Width: 1, Height: 1},
+			TileCount:      1,
+			CompletedCount: 1,
+			MetadataPath:   metadataPath,
+			Tiles: []CaptureTile{{
+				Index:        0,
+				SourceBounds: Bounds{Width: 1, Height: 1},
+				OutputPath:   tilePath,
+				ByteSize:     1,
+				Status:       CaptureTileCompleted,
+			}},
+		},
+	}
+	encoded, err := json.Marshal(captureMetadata)
+	if err != nil {
+		t.Fatalf("marshal capture metadata: %v", err)
+	}
+	if writeErr := os.WriteFile(metadataPath, append(encoded, '\n'), 0o644); writeErr != nil {
+		t.Fatalf("write capture metadata: %v", writeErr)
+	}
+
+	scenario := WorkflowScenario{
+		ID:         "tiled-report-test",
+		Label:      "Tiled Report Test",
+		SourceDir:  tempDir,
+		SourcePath: filepath.Join(tempDir, "tiled-report-test.yaml"),
+		Environment: WorkflowEnvironment{
+			BaseURL:      "http://localhost:8383",
+			ReportFormat: WorkflowReportFormatHTML,
+		},
+		Artifacts: WorkflowArtifactLayout{
+			Root:       filepath.Join(tempDir, "artifacts"),
+			CurrentDir: filepath.Join(tempDir, "artifacts", "current"),
+			DiffDir:    filepath.Join(tempDir, "artifacts", "diff"),
+			ReportDir:  filepath.Join(tempDir, "artifacts", "report"),
+		},
+		Screens: []WorkflowScreen{{
+			ID:             "patient",
+			Label:          "Patient",
+			Route:          "/triage/patient",
+			OutputName:     "patient",
+			ReferenceImage: referencePath,
+		}},
+	}
+
+	service := NewService(nil)
+	result, err := service.GenerateWorkflowReport(context.Background(), WorkflowReportRequest{Scenario: scenario})
+	if err != nil {
+		t.Fatalf("GenerateWorkflowReport returned error: %v", err)
+	}
+	if len(result.Entries) != 1 {
+		t.Fatalf("unexpected entry count: %d", len(result.Entries))
+	}
+	entry := result.Entries[0]
+	if entry.MissingCurrent {
+		t.Fatal("unstitched tiled capture should not be treated as a missing current artifact")
+	}
+	if entry.DiffImagePath != "" || entry.DiffEntry != nil {
+		t.Fatalf("unstitched tiled capture should skip diff, got path=%q entry=%+v", entry.DiffImagePath, entry.DiffEntry)
+	}
+	foundWarning := false
+	for _, warning := range entry.Warnings {
+		if warning.Code == "tiled_capture_unstitched" {
+			foundWarning = true
+			break
+		}
+	}
+	if !foundWarning {
+		t.Fatalf("expected unstitched tiled warning: %+v", entry.Warnings)
+	}
+	stagedMetadata := filepath.Join(scenario.Artifacts.ReportDir, "assets", "tiles-patient", filepath.Base(metadataPath))
+	if _, statErr := os.Stat(stagedMetadata); statErr != nil {
+		t.Fatalf("expected staged tile metadata: %v", statErr)
+	}
+	stagedTile := filepath.Join(scenario.Artifacts.ReportDir, "assets", "tiles-patient", filepath.Base(tilePath))
+	if _, statErr := os.Stat(stagedTile); statErr != nil {
+		t.Fatalf("expected staged tile: %v", statErr)
+	}
+	reportPayload, err := os.ReadFile(result.ReportPath)
+	if err != nil {
+		t.Fatalf("read report: %v", err)
+	}
+	reportHTML := string(reportPayload)
+	for _, expected := range []string{"Tiled Capture", "Tile metadata", "Tile 0000", "tiled_capture_unstitched"} {
+		if !strings.Contains(reportHTML, expected) {
+			t.Fatalf("expected report HTML to contain %q", expected)
+		}
+	}
+}
+
 func TestGenerateWorkflowReportUsesComparisonAssets(t *testing.T) {
 	tempDir := t.TempDir()
 	referencePath := filepath.Join(tempDir, "reference.png")

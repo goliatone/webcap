@@ -127,6 +127,32 @@ func TestCaptureSectionValidationError(t *testing.T) {
 	}
 }
 
+func TestCapturePageAcceptsTileOptions(t *testing.T) {
+	capture := &fakeCaptureService{captureResult: sampleCaptureResult("/tmp/out.png")}
+	server, err := NewServer(Config{
+		Name:    "webcap",
+		Version: "0.1.0",
+		Capture: capture,
+		Diff:    &fakeDiffService{result: sampleDiffResult()},
+		LoadManifest: func(string) (pkgwebcap.Manifest, error) {
+			return pkgwebcap.Manifest{}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewServer returned error: %v", err)
+	}
+	session := server.NewSession()
+	initializeSession(t, session)
+
+	resp := session.handle(context.Background(), []byte(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"capture_page","arguments":{"url":"http://localhost:3000","oversize_policy":"tile","tile":{"max_width":4096,"stitch":true}}}}`))
+	if resp == nil || resp.Error != nil {
+		t.Fatalf("tools/call returned protocol error: %#v", resp)
+	}
+	if capture.lastCapture.OversizePolicy != pkgwebcap.OversizePolicyTile || capture.lastCapture.Tile.MaxWidth != 4096 || !capture.lastCapture.Tile.Stitch {
+		t.Fatalf("tile options were not forwarded: %+v", capture.lastCapture)
+	}
+}
+
 func TestCaptureManifestToolCall(t *testing.T) {
 	capture := &fakeCaptureService{
 		batchResult: pkgwebcap.BatchResult{

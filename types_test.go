@@ -1,6 +1,10 @@
 package webcap
 
-import "testing"
+import (
+	"encoding/json"
+	"errors"
+	"testing"
+)
 
 func TestNormalizeCaptureRequestDefaults(t *testing.T) {
 	req, err := NormalizeCaptureRequest(CaptureRequest{
@@ -25,6 +29,60 @@ func TestNormalizeCaptureRequestDefaults(t *testing.T) {
 	if req.Readiness != defaultReadinessMode {
 		t.Fatalf("unexpected readiness: %s", req.Readiness)
 	}
+	if effectiveOversizePolicy(req) != OversizePolicyFail {
+		t.Fatalf("unexpected oversize policy: %s", effectiveOversizePolicy(req))
+	}
+	if req.OversizePolicy != "" {
+		t.Fatalf("default oversize policy should not be serialized into the request: %s", req.OversizePolicy)
+	}
+	if effectiveTileOptions(req.Tile).MaxWidth != DefaultTileMaxWidth {
+		t.Fatalf("unexpected tile default: %+v", effectiveTileOptions(req.Tile))
+	}
+	encoded, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("Marshal returned error: %v", err)
+	}
+	if string(encoded) == "" || jsonContains(encoded, "tile") || jsonContains(encoded, "oversize_policy") {
+		t.Fatalf("normal request JSON should omit tile defaults: %s", encoded)
+	}
+}
+
+func TestNormalizeCaptureRequestRejectsInvalidTileOptions(t *testing.T) {
+	tests := []CaptureRequest{
+		{URL: "http://localhost:3000", OversizePolicy: "crop"},
+		{URL: "http://localhost:3000", Tile: CaptureTileOptions{MaxWidth: -1}},
+		{URL: "http://localhost:3000", Tile: CaptureTileOptions{MaxWidth: 100, Overlap: 100}},
+	}
+	for _, req := range tests {
+		if _, err := NormalizeCaptureRequest(req); err == nil {
+			t.Fatalf("expected validation error for %+v", req)
+		}
+	}
+}
+
+func TestPartialCaptureErrorCarriesPersistedResult(t *testing.T) {
+	partial := (&PartialCaptureError{
+		Operation:       "capture_tiles",
+		FailedTileIndex: 1,
+		CompletedCount:  1,
+		TotalCount:      2,
+		Err:             errors.New("boom"),
+	}).WithResult(CaptureResult{OutputPath: "out.png"})
+	if partial.Result == nil || partial.Result.OutputPath != "out.png" {
+		t.Fatalf("missing result: %#v", partial.Result)
+	}
+	if !errors.Is(partial, partial.Err) {
+		t.Fatalf("partial error should unwrap underlying error")
+	}
+}
+
+func jsonContains(payload []byte, key string) bool {
+	var decoded map[string]any
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		return false
+	}
+	_, ok := decoded[key]
+	return ok
 }
 
 func TestNormalizeCaptureRequestRejectsConflictingTargetModes(t *testing.T) {

@@ -1,7 +1,13 @@
 package webcap
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"image"
+	"image/color"
+	"image/png"
+	"os"
 	"testing"
 	"time"
 )
@@ -62,4 +68,272 @@ func TestServiceCaptureWritesNormalizationAndMetadata(t *testing.T) {
 	if result.CapturedAt != time.Unix(12, 0).UTC() {
 		t.Fatalf("unexpected captured at: %s", result.CapturedAt)
 	}
+}
+
+func TestServiceCapturePersistsTileArtifactsAndMetadata(t *testing.T) {
+	engine := stubEngine{result: tiledEngineResult([]byte("tile-a"), []byte("tile-b"))}
+	service := NewService(engine)
+	dir := t.TempDir()
+	result, err := service.Capture(context.Background(), CaptureRequest{
+		URL:            "http://localhost:3000",
+		FullPage:       true,
+		OutputPath:     dir + "/capture.png",
+		OversizePolicy: OversizePolicyTile,
+	})
+	if err != nil {
+		t.Fatalf("Capture returned error: %v", err)
+	}
+	if result.Tiling == nil || result.Tiling.CompletedCount != 2 {
+		t.Fatalf("unexpected tiling result: %+v", result.Tiling)
+	}
+	if _, statErr := os.Stat(dir + "/capture.tile-0000.png"); statErr != nil {
+		t.Fatalf("expected first tile file: %v", statErr)
+	}
+	if _, statErr := os.Stat(dir + "/capture.tile-0001.png"); statErr != nil {
+		t.Fatalf("expected second tile file: %v", statErr)
+	}
+	payload, readErr := os.ReadFile(result.MetadataPath)
+	if readErr != nil {
+		t.Fatalf("expected metadata: %v", readErr)
+	}
+	var metadata CaptureResult
+	if err := json.Unmarshal(payload, &metadata); err != nil {
+		t.Fatalf("metadata JSON invalid: %v", err)
+	}
+	if metadata.Tiling == nil || metadata.Tiling.Tiles[0].OutputPath == "" {
+		t.Fatalf("metadata missing tile paths: %+v", metadata.Tiling)
+	}
+	if len(metadata.Tiling.Tiles[0].Bytes) != 0 {
+		t.Fatalf("metadata must not embed tile bytes")
+	}
+}
+
+func TestServiceCaptureReturnsPartialResultWithPersistedTiles(t *testing.T) {
+	engineResult := tiledEngineResult([]byte("tile-a"), nil)
+	engineResult.Tiling.Status = CaptureTilingPartial
+	engineResult.Tiling.Tiles[1].Status = CaptureTileFailed
+	engineResult.Tiling.Tiles[1].Error = "boom"
+	engineResult.Tiling.CompletedCount = 1
+	engineResult.Tiling.FailedCount = 1
+	engine := stubEngine{
+		result: engineResult,
+		err: &PartialCaptureError{
+			Operation:       "capture_tiles",
+			FailedTileIndex: 1,
+			CompletedCount:  1,
+			TotalCount:      2,
+		},
+	}
+	service := NewService(engine)
+	dir := t.TempDir()
+	result, err := service.Capture(context.Background(), CaptureRequest{
+		URL:            "http://localhost:3000",
+		FullPage:       true,
+		OutputPath:     dir + "/capture.png",
+		OversizePolicy: OversizePolicyTile,
+	})
+	if err == nil {
+		t.Fatal("expected partial capture error")
+	}
+	partial, ok := err.(*PartialCaptureError)
+	if !ok {
+		t.Fatalf("expected partial error, got %T", err)
+	}
+	if partial.Result == nil || partial.Result.Tiling == nil || partial.Result.Tiling.CompletedCount != 1 {
+		t.Fatalf("partial error missing persisted result: %+v", partial.Result)
+	}
+	if result.Tiling == nil || result.Tiling.Status != CaptureTilingPartial {
+		t.Fatalf("unexpected returned result: %+v", result.Tiling)
+	}
+	if _, statErr := os.Stat(dir + "/capture.tile-0000.png"); statErr != nil {
+		t.Fatalf("expected completed tile file: %v", statErr)
+	}
+	if _, statErr := os.Stat(dir + "/capture.tile-0001.png"); !os.IsNotExist(statErr) {
+		t.Fatalf("failed tile should not be written, stat err=%v", statErr)
+	}
+}
+
+func TestServiceCaptureBatchReturnsAccumulatedPartialResult(t *testing.T) {
+	engineResult := tiledEngineResult([]byte("tile-a"), nil)
+	engineResult.Tiling.Status = CaptureTilingPartial
+	engineResult.Tiling.Tiles[1].Status = CaptureTileFailed
+	engineResult.Tiling.CompletedCount = 1
+	engineResult.Tiling.FailedCount = 1
+	engine := stubEngine{
+		result: engineResult,
+		err: &PartialCaptureError{
+			Operation:       "capture_tiles",
+			FailedTileIndex: 1,
+			CompletedCount:  1,
+			TotalCount:      2,
+		},
+	}
+	service := NewService(engine)
+	dir := t.TempDir()
+	batch, err := service.CaptureBatch(context.Background(), Manifest{
+		OutputDir: dir,
+		Shots: []ManifestShot{{
+			URL:            "http://localhost:3000",
+			Output:         "capture.png",
+			FullPage:       true,
+			OversizePolicy: OversizePolicyTile,
+		}},
+	}, "")
+	if err == nil {
+		t.Fatal("expected partial capture error")
+	}
+	if len(batch.Results) != 1 || batch.Results[0].Tiling == nil || batch.Results[0].Tiling.CompletedCount != 1 {
+		t.Fatalf("batch should include partial result: %+v", batch)
+	}
+}
+
+func TestServiceCaptureStitchesTiles(t *testing.T) {
+	left := pngBytes(t, color.RGBA{R: 255, A: 255})
+	right := pngBytes(t, color.RGBA{B: 255, A: 255})
+	engine := stubEngine{result: tiledEngineResult(left, right)}
+	service := NewService(engine)
+	dir := t.TempDir()
+	result, err := service.Capture(context.Background(), CaptureRequest{
+		URL:            "http://localhost:3000",
+		FullPage:       true,
+		OutputPath:     dir + "/capture.png",
+		OversizePolicy: OversizePolicyTile,
+		Tile: CaptureTileOptions{
+			Stitch: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Capture returned error: %v", err)
+	}
+	if result.Tiling == nil || result.Tiling.StitchedPath != result.OutputPath {
+		t.Fatalf("unexpected stitched result: %+v", result.Tiling)
+	}
+	if _, statErr := os.Stat(result.OutputPath); statErr != nil {
+		t.Fatalf("expected stitched output: %v", statErr)
+	}
+}
+
+func TestServiceCaptureStitchesOverlappingTilesWithoutDuplicateBand(t *testing.T) {
+	left := pngImageBytes(t, []color.Color{color.RGBA{R: 255, A: 255}, color.RGBA{G: 255, A: 255}})
+	right := pngImageBytes(t, []color.Color{color.RGBA{B: 255, A: 255}, color.RGBA{R: 255, G: 255, A: 255}})
+	engineResult := tiledEngineResult(left, right)
+	engineResult.Tiling.TargetBounds = Bounds{Width: 3, Height: 1}
+	engineResult.Tiling.Tiles[0].SourceBounds = Bounds{X: 0, Y: 0, Width: 2, Height: 1}
+	engineResult.Tiling.Tiles[0].DestinationBounds = &Bounds{X: 0, Y: 0, Width: 2, Height: 1}
+	engineResult.Tiling.Tiles[1].SourceBounds = Bounds{X: 1, Y: 0, Width: 2, Height: 1}
+	engineResult.Tiling.Tiles[1].DestinationBounds = &Bounds{X: 2, Y: 0, Width: 1, Height: 1}
+	engine := stubEngine{result: engineResult}
+	service := NewService(engine)
+	dir := t.TempDir()
+	result, err := service.Capture(context.Background(), CaptureRequest{
+		URL:            "http://localhost:3000",
+		FullPage:       true,
+		OutputPath:     dir + "/capture.png",
+		OversizePolicy: OversizePolicyTile,
+		Tile:           CaptureTileOptions{Stitch: true},
+	})
+	if err != nil {
+		t.Fatalf("Capture returned error: %v", err)
+	}
+	payload, err := os.ReadFile(result.OutputPath)
+	if err != nil {
+		t.Fatalf("read stitched output: %v", err)
+	}
+	img, err := png.Decode(bytes.NewReader(payload))
+	if err != nil {
+		t.Fatalf("decode stitched output: %v", err)
+	}
+	if img.Bounds().Dx() != 3 {
+		t.Fatalf("unexpected stitched width: %d", img.Bounds().Dx())
+	}
+	r, g, b, _ := img.At(2, 0).RGBA()
+	if r == 0 || g == 0 || b != 0 {
+		t.Fatalf("expected cropped pixel from second tile at destination edge")
+	}
+}
+
+func TestServiceCaptureRejectsOversizedStitchedOutputBeforeAllocation(t *testing.T) {
+	engine := stubEngine{result: tiledEngineResult(pngBytes(t, color.Black), pngBytes(t, color.White))}
+	service := NewService(engine)
+	_, err := service.Capture(context.Background(), CaptureRequest{
+		URL:            "http://localhost:3000",
+		FullPage:       true,
+		OutputPath:     t.TempDir() + "/capture.png",
+		OversizePolicy: OversizePolicyTile,
+		Tile: CaptureTileOptions{
+			Stitch:            true,
+			MaxStitchedPixels: 1,
+		},
+	})
+	if err == nil {
+		t.Fatal("expected max stitched pixels error")
+	}
+}
+
+func tiledEngineResult(first, second []byte) EngineResult {
+	tiles := []CaptureTile{
+		{
+			Index:             0,
+			Row:               0,
+			Column:            0,
+			SourceBounds:      Bounds{X: 0, Y: 0, Width: 1, Height: 1},
+			DestinationBounds: &Bounds{X: 0, Y: 0, Width: 1, Height: 1},
+			Status:            CaptureTileCompleted,
+			Bytes:             first,
+			ByteSize:          len(first),
+		},
+		{
+			Index:             1,
+			Row:               0,
+			Column:            1,
+			SourceBounds:      Bounds{X: 1, Y: 0, Width: 1, Height: 1},
+			DestinationBounds: &Bounds{X: 1, Y: 0, Width: 1, Height: 1},
+			Status:            CaptureTileCompleted,
+			Bytes:             second,
+			ByteSize:          len(second),
+		},
+	}
+	return EngineResult{
+		Artifact: CaptureArtifact{
+			ImageFormat: "png",
+			Mode:        CaptureModeFullPage,
+			URL:         "http://localhost:3000",
+			Viewport:    Viewport{Width: 1440, Height: 1200, ScaleFactor: 1},
+		},
+		Browser: BrowserInfo{Engine: "stub", Headless: true},
+		Timing:  CaptureTiming{CapturedAt: time.Unix(12, 0).UTC()},
+		Tiling: &CaptureTiling{
+			Status:         CaptureTilingComplete,
+			TargetBounds:   Bounds{Width: 2, Height: 1},
+			Limits:         CaptureTileLimits{ScaleFactor: 1, MaxStitchedPixels: DefaultTileMaxStitchPixels},
+			TileCount:      2,
+			CompletedCount: 2,
+			Tiles:          tiles,
+		},
+	}
+}
+
+func pngBytes(t *testing.T, c color.Color) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	img.Set(0, 0, c)
+	return encodeTestPNG(t, img)
+}
+
+func pngImageBytes(t *testing.T, pixels []color.Color) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, len(pixels), 1))
+	for x, c := range pixels {
+		img.Set(x, 0, c)
+	}
+	return encodeTestPNG(t, img)
+}
+
+func encodeTestPNG(t *testing.T, img image.Image) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatalf("png encode failed: %v", err)
+	}
+	return buf.Bytes()
 }

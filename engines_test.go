@@ -2,6 +2,7 @@ package webcap
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -78,5 +79,29 @@ func TestPlaywrightEngineCaptureBridge(t *testing.T) {
 	}
 	if result.Browser.Engine != "playwright" {
 		t.Fatalf("unexpected browser engine: %s", result.Browser.Engine)
+	}
+}
+
+func TestPlaywrightEngineRejectsTiledCapture(t *testing.T) {
+	engine, err := NewPlaywrightEngine(PlaywrightOptions{
+		NodeBinary: "node",
+		RuntimeDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("NewPlaywrightEngine returned error: %v", err)
+	}
+	_, err = engine.Capture(context.Background(), CaptureRequest{
+		URL:            "http://localhost:3000",
+		OversizePolicy: OversizePolicyTile,
+	})
+	if err == nil {
+		t.Fatal("expected unsupported tiled capture error")
+	}
+	var captureErr *Error
+	if !errors.As(err, &captureErr) {
+		t.Fatalf("expected structured error, got %T", err)
+	}
+	if captureErr.Code != CodeUnsupported || captureErr.Metadata["engine"] != "playwright" {
+		t.Fatalf("unexpected unsupported error: %+v", captureErr)
 	}
 }

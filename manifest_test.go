@@ -1,6 +1,10 @@
 package webcap
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestManifestRequestsApplyDefaults(t *testing.T) {
 	manifest := Manifest{
@@ -38,5 +42,71 @@ func TestManifestRequestsApplyDefaults(t *testing.T) {
 	}
 	if req.Readiness != defaultReadinessMode {
 		t.Fatalf("unexpected readiness: %s", req.Readiness)
+	}
+}
+
+func TestManifestRequestsApplyTileDefaultsAndShotOverrides(t *testing.T) {
+	manifest := Manifest{
+		OutputDir:      "shots",
+		OversizePolicy: OversizePolicyTile,
+		Tile: CaptureTileOptions{
+			MaxWidth:  4000,
+			MaxHeight: 3000,
+			Overlap:   10,
+		},
+		Shots: []ManifestShot{
+			{
+				ID:  "home",
+				URL: "http://localhost:3000",
+				Tile: CaptureTileOptions{
+					MaxHeight: 2000,
+				},
+			},
+		},
+	}
+
+	requests, err := manifest.Requests("")
+	if err != nil {
+		t.Fatalf("Requests returned error: %v", err)
+	}
+	req := requests[0]
+	if req.OversizePolicy != OversizePolicyTile {
+		t.Fatalf("unexpected oversize policy: %s", req.OversizePolicy)
+	}
+	if req.Tile.MaxWidth != 4000 || req.Tile.MaxHeight != 2000 || req.Tile.Overlap != 10 {
+		t.Fatalf("unexpected tile merge: %+v", req.Tile)
+	}
+}
+
+func TestManifestTileShotOverridesCanDisableBooleanDefaults(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "manifest.yaml")
+	if err := os.WriteFile(path, []byte(`
+output_dir: shots
+oversize_policy: tile
+tile:
+  stitch: true
+  cleanup_tiles: true
+  overlap: 12
+shots:
+  - id: home
+    url: http://localhost:3000
+    tile:
+      stitch: false
+      cleanup_tiles: false
+      overlap: 0
+`), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	manifest, err := LoadManifest(path)
+	if err != nil {
+		t.Fatalf("LoadManifest returned error: %v", err)
+	}
+	requests, err := manifest.Requests("")
+	if err != nil {
+		t.Fatalf("Requests returned error: %v", err)
+	}
+	if requests[0].Tile.Stitch || requests[0].Tile.CleanupTiles || requests[0].Tile.Overlap != 0 {
+		t.Fatalf("shot tile options should override manifest defaults: %+v", requests[0].Tile)
 	}
 }

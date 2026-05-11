@@ -48,6 +48,30 @@ func TestJSONPresenterRendersStructuredErrors(t *testing.T) {
 	}
 }
 
+func TestJSONPresenterRendersPartialCaptureBeforeUnderlyingError(t *testing.T) {
+	partial := (&pkgwebcap.PartialCaptureError{
+		Operation:       "capture_tiles",
+		FailedTileIndex: 1,
+		CompletedCount:  1,
+		TotalCount:      2,
+		Err:             &pkgwebcap.Error{Code: pkgwebcap.CodeCapture, Operation: "capture_tile", Message: "tile failed"},
+	}).WithResult(pkgwebcap.CaptureResult{MetadataPath: "shots/tall.png.json"})
+	var buf bytes.Buffer
+	if writeErr := New(Options{Format: FormatJSON}).PresentError(&buf, partial); writeErr != nil {
+		t.Fatalf("PresentError returned error: %v", writeErr)
+	}
+	var envelope ErrorEnvelope
+	if decodeErr := json.Unmarshal(buf.Bytes(), &envelope); decodeErr != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", decodeErr, buf.String())
+	}
+	if envelope.Code != string(pkgwebcap.CodePartialCapture) || envelope.Operation != "capture_tiles" {
+		t.Fatalf("unexpected envelope: %#v", envelope)
+	}
+	if envelope.Metadata["result"] == nil {
+		t.Fatalf("expected persisted partial result metadata: %#v", envelope.Metadata)
+	}
+}
+
 func TestHumanCaptureOutputNoColorIsStable(t *testing.T) {
 	var buf bytes.Buffer
 	if err := New(Options{Format: FormatHuman, Color: false}).Present(&buf, sampleCaptureResult()); err != nil {
@@ -98,6 +122,42 @@ func TestHumanErrorOutput(t *testing.T) {
 	}
 	if got := buf.String(); got != "Error: boom\n" {
 		t.Fatalf("unexpected human error: %q", got)
+	}
+}
+
+func TestHumanPartialCaptureErrorOutputIncludesArtifacts(t *testing.T) {
+	partial := (&pkgwebcap.PartialCaptureError{
+		Operation:       "capture_tiles",
+		FailedTileIndex: 1,
+		CompletedCount:  1,
+		TotalCount:      2,
+	}).WithResult(pkgwebcap.CaptureResult{
+		MetadataPath: "shots/tall.png.json",
+		Tiling: &pkgwebcap.CaptureTiling{
+			Status: pkgwebcap.CaptureTilingPartial,
+			Tiles: []pkgwebcap.CaptureTile{{
+				Index:      0,
+				Status:     pkgwebcap.CaptureTileCompleted,
+				OutputPath: "shots/tall.tile-0000.png",
+			}},
+		},
+	})
+	var buf bytes.Buffer
+	if err := New(Options{Format: FormatHuman}).PresentError(&buf, partial); err != nil {
+		t.Fatalf("PresentError returned error: %v", err)
+	}
+	output := buf.String()
+	for _, expected := range []string{
+		"partial tiled capture",
+		"Failed tile: 1",
+		"Tiles: 1/2 completed",
+		"Metadata: shots/tall.png.json",
+		"Tiling: partial",
+		"First tile: shots/tall.tile-0000.png",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("expected output to contain %q, got:\n%s", expected, output)
+		}
 	}
 }
 

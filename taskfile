@@ -1181,9 +1181,9 @@ function release {
         exit 1
     fi
 
-    if [ -n "$(git status --porcelain)" ]; then
+    if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
         _task:log ERR "Release requires a clean working tree"
-        git status --short
+        git status --short --untracked-files=no
         exit 1
     fi
 

@@ -63,9 +63,9 @@ func TestHumanWorkflowOutput(t *testing.T) {
 		CurrentDir:   "current",
 		CapturedAt:   time.Date(2026, 5, 11, 10, 0, 0, 0, time.UTC),
 		Results: []pkgwebcap.WorkflowScreenCaptureResult{{
-			ScreenID:   "home",
-			Label:      "Home",
-			OutputPath: "current/home.png",
+			ScreenID:     "home",
+			Label:        "Home",
+			OutputPath:   "current/home.png",
 			MetadataPath: "current/home.png.json",
 			Capture: pkgwebcap.CaptureResult{
 				Warnings: []pkgwebcap.CaptureWarning{{Code: "viewport", Message: "viewport adjusted"}},

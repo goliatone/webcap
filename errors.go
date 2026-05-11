@@ -19,6 +19,9 @@ const (
 	CodeTimeout          ErrorCode = "timeout_error"
 	CodeWrite            ErrorCode = "write_error"
 	CodeCapture          ErrorCode = "capture_error"
+	CodeOversize         ErrorCode = "oversize_error"
+	CodeUnsupported      ErrorCode = "unsupported_error"
+	CodePartialCapture   ErrorCode = "partial_capture_error"
 )
 
 type Error struct {
@@ -65,6 +68,45 @@ func newCaptureError(code ErrorCode, operation, message string, err error) *Erro
 		Message:   message,
 		Err:       err,
 	}
+}
+
+type PartialCaptureError struct {
+	Operation       string         `json:"operation"`
+	FailedTileIndex int            `json:"failed_tile_index,omitempty"`
+	CompletedCount  int            `json:"completed_count"`
+	TotalCount      int            `json:"total_count"`
+	Result          *CaptureResult `json:"result,omitempty"`
+	Err             error          `json:"-"`
+}
+
+func (e *PartialCaptureError) Error() string {
+	if e == nil {
+		return ""
+	}
+	return fmt.Sprintf("partial tiled capture: completed %d of %d tiles", e.CompletedCount, e.TotalCount)
+}
+
+func (e *PartialCaptureError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+func (e *PartialCaptureError) WithResult(result CaptureResult) *PartialCaptureError {
+	if e == nil {
+		return nil
+	}
+	e.Result = &result
+	return e
+}
+
+func newOversizeError(operation string, mode CaptureMode, target Bounds, limits CaptureTileLimits, policy OversizePolicy) *Error {
+	return newCaptureError(CodeOversize, operation, "capture target exceeds configured screenshot limits", nil).WithMetadata("mode", mode).
+		WithMetadata("target_bounds", target).
+		WithMetadata("limits", limits).
+		WithMetadata("oversize_policy", policy).
+		WithMetadata("guidance", "use oversize_policy=tile to capture the target as deterministic tile artifacts")
 }
 
 func wrapCaptureError(operation string, err error) error {

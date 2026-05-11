@@ -426,6 +426,17 @@ Common browser flags:
   --node-binary                Node.js binary used by the Playwright engine.
   --playwright-runtime-dir     Optional override for the Playwright runtime directory.
 
+Tiled capture flags for shot:
+  --oversize                   Oversize policy: fail or tile.
+  --tile-max-width             Maximum tile width in CSS pixels.
+  --tile-max-height            Maximum tile height in CSS pixels.
+  --tile-max-pixels            Maximum tile pixels in device pixels.
+  --tile-max-target-pixels     Maximum tiled target pixels in device pixels.
+  --tile-overlap               Tile overlap in CSS pixels.
+  --tile-stitch                Stitch completed tiles into the requested output image.
+  --tile-max-stitched-pixels   Maximum stitched output pixels in device pixels.
+  --tile-cleanup               Delete generated tile files after stitched output succeeds.
+
 Semantic provider flags:
   --openai-base-url            Override the OpenAI semantic provider endpoint.
   --anthropic-base-url         Override the Anthropic semantic provider endpoint.

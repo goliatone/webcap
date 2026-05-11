@@ -2,14 +2,15 @@ package main
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"io/fs"
-	"log"
 	"os"
 
 	pkgwebcap "github.com/goliatone/webcap"
 	commandwebcap "github.com/goliatone/webcap/commands/webcap"
+	"github.com/goliatone/webcap/internal/presentation"
 	webcapmcp "github.com/goliatone/webcap/mcp"
 	"github.com/goliatone/webcap/pkg/agents/skills"
 	"github.com/goliatone/webcap/pkg/llms"
@@ -21,25 +22,56 @@ const webcapAgentSkillName = "webcap-agent"
 var skillSourceFS func() fs.FS = webcapAgentSkillSource
 
 func main() {
-	invocation, err := parseCLI(os.Args[1:])
-	if err != nil {
-		log.Fatal(err)
-	}
+	os.Exit(runCLI(context.Background(), os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
+}
 
-	if err := run(context.Background(), invocation); err != nil {
-		log.Fatal(err)
+func runCLI(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	invocation, err := parseCLI(args)
+	if err != nil {
+		opts := defaultOutputOptions()
+		var parseErr cliParseError
+		if errors.As(err, &parseErr) {
+			opts = parseErr.Output
+			_ = normalizeOutputOptions(&opts)
+		}
+		_ = presentError(stderr, opts, err)
+		return 1
 	}
+	if err := newApp(stdin, stdout, stderr).run(ctx, invocation); err != nil {
+		_ = presentError(stderr, invocation.Output, err)
+		return 1
+	}
+	return 0
+}
+
+type app struct {
+	stdin  io.Reader
+	stdout io.Writer
+	stderr io.Writer
+}
+
+func newApp(stdin io.Reader, stdout, stderr io.Writer) app {
+	return app{stdin: stdin, stdout: stdout, stderr: stderr}
 }
 
 func run(ctx context.Context, invocation cliInvocation) error {
-	handlers := map[string]func(context.Context, cliInvocation) error{
-		"help":          runHelp,
-		"version":       runVersion,
+	return newApp(os.Stdin, os.Stdout, os.Stderr).run(ctx, invocation)
+}
+
+func (a app) run(ctx context.Context, invocation cliInvocation) error {
+	switch invocation.Command {
+	case "help":
+		return runHelp(ctx, invocation, a.stdout)
+	case "version":
+		return runVersion(ctx, invocation, a.stdout)
+	case "mcp":
+		return runMCP(ctx, invocation, a.stdin, a.stdout)
+	}
+	handlers := map[string]func(context.Context, cliInvocation) (any, error){
 		"shot":          runShot,
 		"multi":         runMulti,
 		"diff":          runDiff,
 		"semantic-diff": runSemanticDiff,
-		"mcp":           runMCP,
 		"workflow":      runWorkflow,
 		"report":        runReport,
 		"skill":         runSkill,
@@ -48,12 +80,16 @@ func run(ctx context.Context, invocation cliInvocation) error {
 	if !ok {
 		return fmt.Errorf("unsupported command %q", invocation.Command)
 	}
-	return handler(ctx, invocation)
+	result, err := handler(ctx, invocation)
+	if err != nil {
+		return err
+	}
+	return presenter(invocation.Output).Present(a.stdout, result)
 }
 
-func runSkill(ctx context.Context, invocation cliInvocation) error {
+func runSkill(ctx context.Context, invocation cliInvocation) (any, error) {
 	if invocation.Skill.Action != "install" {
-		return fmt.Errorf("unsupported skill action %q", invocation.Skill.Action)
+		return nil, fmt.Errorf("unsupported skill action %q", invocation.Skill.Action)
 	}
 	handler := commandwebcap.NewSkillInstallHandler()
 	result, err := handler.Handle(ctx, commandwebcap.SkillInstallMessage{
@@ -66,83 +102,87 @@ func runSkill(ctx context.Context, invocation cliInvocation) error {
 		},
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
-	printJSON(result)
-	return nil
+	return result, nil
 }
 
-func runSemanticDiff(ctx context.Context, invocation cliInvocation) error {
+func runSemanticDiff(ctx context.Context, invocation cliInvocation) (any, error) {
 	service := pkgwebcap.NewServiceWithOptions(nil, semanticServiceOptions(invocation.Provider))
 	handler := commandwebcap.NewSemanticDiffHandler(service)
 	result, err := handler.Handle(ctx, commandwebcap.SemanticDiffMessage{
 		Request: invocation.Semantic.Request,
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
-	printJSON(result)
-	return nil
+	return result, nil
 }
 
-func runHelp(_ context.Context, _ cliInvocation) error {
-	_, err := fmt.Fprint(os.Stdout, helpText)
+func runHelp(_ context.Context, _ cliInvocation, stdout io.Writer) error {
+	_, err := fmt.Fprint(stdout, helpText)
 	return err
 }
 
-func runVersion(_ context.Context, _ cliInvocation) error {
-	return version.Print(os.Stdout)
+func runVersion(_ context.Context, _ cliInvocation, stdout io.Writer) error {
+	return version.Print(stdout)
 }
 
-func runShot(ctx context.Context, invocation cliInvocation) error {
-	service := newCaptureService(invocation.Browser, invocation.Provider)
+func runShot(ctx context.Context, invocation cliInvocation) (any, error) {
+	service, err := newCaptureService(invocation.Browser, invocation.Provider)
+	if err != nil {
+		return nil, err
+	}
 	handler := commandwebcap.NewCaptureShotHandler(service)
 	result, err := handler.Handle(ctx, commandwebcap.CaptureShotMessage{
 		Request: invocation.Shot.Request,
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
-	printJSON(result)
-	return nil
+	return result, nil
 }
 
-func runMulti(ctx context.Context, invocation cliInvocation) error {
+func runMulti(ctx context.Context, invocation cliInvocation) (any, error) {
 	manifest, err := pkgwebcap.LoadManifest(invocation.Multi.ManifestPath)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	service := newCaptureService(invocation.Browser, invocation.Provider)
+	service, err := newCaptureService(invocation.Browser, invocation.Provider)
+	if err != nil {
+		return nil, err
+	}
 	handler := commandwebcap.NewCaptureBatchHandler(service)
 	result, err := handler.Handle(ctx, commandwebcap.CaptureBatchMessage{
 		Manifest:  manifest,
 		OutputDir: invocation.Multi.OutputDir,
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
-	printJSON(result)
-	return nil
+	return result, nil
 }
 
-func runDiff(ctx context.Context, invocation cliInvocation) error {
+func runDiff(ctx context.Context, invocation cliInvocation) (any, error) {
 	service := pkgwebcap.NewService(nil)
 	handler := commandwebcap.NewDiffHandler(service)
 	result, err := handler.Handle(ctx, commandwebcap.DiffMessage{
 		Request: invocation.Diff.Request,
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
-	printJSON(result)
-	return nil
+	return result, nil
 }
 
-func runMCP(ctx context.Context, invocation cliInvocation) error {
+func runMCP(ctx context.Context, invocation cliInvocation, stdin io.Reader, stdout io.Writer) error {
 	if invocation.MCP.Action != "serve" {
 		return fmt.Errorf("unsupported mcp action %q", invocation.MCP.Action)
 	}
-	service := newCaptureService(invocation.Browser, invocation.Provider)
+	service, err := newCaptureService(invocation.Browser, invocation.Provider)
+	if err != nil {
+		return err
+	}
 	server, err := webcapmcp.NewServer(webcapmcp.Config{
 		Name:         "webcap",
 		Version:      version.Tag,
@@ -154,51 +194,49 @@ func runMCP(ctx context.Context, invocation cliInvocation) error {
 	if err != nil {
 		return err
 	}
-	return server.Serve(ctx, os.Stdin, os.Stdout)
+	return server.Serve(ctx, stdin, stdout)
 }
 
-func runWorkflow(ctx context.Context, invocation cliInvocation) error {
+func runWorkflow(ctx context.Context, invocation cliInvocation) (any, error) {
 	scenario, err := pkgwebcap.LoadWorkflowScenario(invocation.Workflow.ScenarioPath)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	service := newScenarioCaptureService(invocation.Browser, invocation.Provider, scenario)
+	service, err := newScenarioCaptureService(invocation.Browser, invocation.Provider, scenario)
+	if err != nil {
+		return nil, err
+	}
 	handler := commandwebcap.NewCaptureScenarioHandler(service)
 	captureResult, err := handler.Handle(ctx, commandwebcap.CaptureScenarioMessage{
 		Scenario: scenario,
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !invocation.Workflow.RunReport {
-		printJSON(captureResult)
-		return nil
+		return captureResult, nil
 	}
 	return runWorkflowReport(ctx, service, scenario, captureResult)
 }
 
-func runWorkflowReport(ctx context.Context, service *pkgwebcap.Service, scenario pkgwebcap.WorkflowScenario, captureResult pkgwebcap.WorkflowCaptureResult) error {
+func runWorkflowReport(ctx context.Context, service *pkgwebcap.Service, scenario pkgwebcap.WorkflowScenario, captureResult pkgwebcap.WorkflowCaptureResult) (any, error) {
 	reportHandler := commandwebcap.NewWorkflowReportHandler(service)
 	reportResult, err := reportHandler.Handle(ctx, commandwebcap.WorkflowReportMessage{
 		Request: pkgwebcap.WorkflowReportRequest{Scenario: scenario},
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
-	printJSON(struct {
-		Capture pkgwebcap.WorkflowCaptureResult `json:"capture"`
-		Report  pkgwebcap.WorkflowReportResult  `json:"report"`
-	}{
+	return presentation.WorkflowRunReportResult{
 		Capture: captureResult,
 		Report:  reportResult,
-	})
-	return nil
+	}, nil
 }
 
-func runReport(ctx context.Context, invocation cliInvocation) error {
+func runReport(ctx context.Context, invocation cliInvocation) (any, error) {
 	scenario, err := pkgwebcap.LoadWorkflowScenario(invocation.Report.ScenarioPath)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	service := pkgwebcap.NewServiceWithOptions(nil, semanticServiceOptions(invocation.Provider))
 	handler := commandwebcap.NewWorkflowReportHandler(service)
@@ -206,26 +244,25 @@ func runReport(ctx context.Context, invocation cliInvocation) error {
 		Request: pkgwebcap.WorkflowReportRequest{Scenario: scenario},
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
-	printJSON(result)
-	return nil
+	return result, nil
 }
 
-func newCaptureService(browser browserOptions, provider semanticProviderOptions) *pkgwebcap.Service {
+func newCaptureService(browser browserOptions, provider semanticProviderOptions) (*pkgwebcap.Service, error) {
 	engine, err := pkgwebcap.NewEngine(browserEngineConfig(browser))
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
-	return pkgwebcap.NewServiceWithOptions(engine, semanticServiceOptions(provider))
+	return pkgwebcap.NewServiceWithOptions(engine, semanticServiceOptions(provider)), nil
 }
 
-func newScenarioCaptureService(browser browserOptions, provider semanticProviderOptions, scenario pkgwebcap.WorkflowScenario) *pkgwebcap.Service {
+func newScenarioCaptureService(browser browserOptions, provider semanticProviderOptions, scenario pkgwebcap.WorkflowScenario) (*pkgwebcap.Service, error) {
 	engine, err := pkgwebcap.NewEngine(mergeScenarioEngineConfig(browser, scenario))
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
-	return pkgwebcap.NewServiceWithOptions(engine, semanticServiceOptions(provider))
+	return pkgwebcap.NewServiceWithOptions(engine, semanticServiceOptions(provider)), nil
 }
 
 func semanticServiceOptions(provider semanticProviderOptions) pkgwebcap.Options {
@@ -308,14 +345,19 @@ func firstNonEmptyValue(values ...string) string {
 	return ""
 }
 
-func printJSON(value any) {
-	encoded, err := json.MarshalIndent(value, "", "  ")
-	if err != nil {
-		log.Fatal(err)
+func presenter(opts outputOptions) presentation.Presenter {
+	format := presentation.Format(opts.Format)
+	if format == "" {
+		format = presentation.FormatHuman
 	}
-	if _, err := os.Stdout.Write(append(encoded, '\n')); err != nil {
-		log.Fatal(err)
-	}
+	return presentation.New(presentation.Options{
+		Format: format,
+		Color:  !opts.NoColor,
+	})
+}
+
+func presentError(stderr io.Writer, opts outputOptions, err error) error {
+	return presenter(opts).PresentError(stderr, err)
 }
 
 const helpText = `webcap captures browser screenshots, runs capture manifests, compares images, and serves MCP tools.
@@ -328,9 +370,9 @@ Usage:
   webcap diff [flags] <base-path> <compare-path>
   webcap semantic-diff [flags] <current-image> <reference-image>
   webcap workflow capture-scenario [flags] <scenario-path>
-  webcap report scenario <scenario-path>
+  webcap report scenario [flags] <scenario-path>
   webcap mcp serve [flags]
-  webcap skill install --agent <codex|claude> [--force]
+  webcap skill install [flags] --agent <codex|claude>
 
 Commands:
   help                         Show this help message.
@@ -343,6 +385,11 @@ Commands:
   report scenario              Generate a workflow HTML review report.
   mcp serve                    Start the stdio MCP server.
   skill install                Install the bundled webcap-agent skill.
+
+Output flags for result commands:
+  --json                       Render machine-readable JSON output.
+  --format                     Output format: human or json.
+  --no-color                   Disable terminal color styling.
 
 Common browser flags:
   --engine                     Capture engine: chromium or playwright.

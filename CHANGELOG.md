@@ -1,6 +1,21 @@
 # Changelog
 
+# [0.5.0](https://github.com/goliatone/webcap/compare/v0.4.0...v0.5.0) - (2026-05-11)
+
+## <!-- 16 -->➕ Add
+
+- Tiling for composed captures ([c0cc464](https://github.com/goliatone/webcap/commit/c0cc46438956c54704a3744d56efb65ca4d84aa7))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update readme ([c794bee](https://github.com/goliatone/webcap/commit/c794bee1a19b8635c2a0fdf2730d066b18701e81))  - (goliatone)
+- Update tests ([18d7633](https://github.com/goliatone/webcap/commit/18d7633d4e9ccb386c36cbc81f454096a18772a6))  - (goliatone)
+
 # [0.4.0](https://github.com/goliatone/webcap/compare/v0.3.0...v0.4.0) - (2026-05-11)
+
+## <!-- 12 -->🔖 Releases
+
+- V0.4.0 ([ba4fa30](https://github.com/goliatone/webcap/commit/ba4fa3096c6f31241a7ac5a5493d3657e309a829))  - (goliatone)
 
 ## <!-- 16 -->➕ Add
 

@@ -80,6 +80,14 @@ func (e *PlaywrightEngine) Capture(ctx context.Context, req CaptureRequest) (Eng
 	if err != nil {
 		return EngineResult{}, err
 	}
+	if effectiveOversizePolicy(normalized) == OversizePolicyTile {
+		return EngineResult{}, newCaptureError(CodeUnsupported, "playwright_capture", "playwright does not support oversize_policy=tile yet", nil).
+			WithMetadata("engine", e.Name()).
+			WithMetadata("browser", e.opts.BrowserName).
+			WithMetadata("mode", normalized.Mode()).
+			WithMetadata("oversize_policy", effectiveOversizePolicy(normalized)).
+			WithMetadata("guidance", "use the chromium engine for tiled captures or omit oversize_policy=tile")
+	}
 
 	payload := playwrightBridgeRequest{Request: normalized}
 	payload.Options.BrowserName = e.opts.BrowserName

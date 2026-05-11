@@ -1,10 +1,13 @@
 package webcap
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -16,6 +19,14 @@ const (
 	defaultReadinessIdle   = 500 * time.Millisecond
 	defaultReadinessMode   = ReadinessComplete
 	defaultOutputDirectory = "webcap-output"
+
+	DefaultOversizePolicy      = OversizePolicyFail
+	DefaultTileMaxWidth        = 8192
+	DefaultTileMaxHeight       = 8192
+	DefaultTileMaxPixels       = 67108864
+	DefaultTileMaxTargetPixels = 536870912
+	DefaultTileMaxStitchPixels = 268435456
+	DefaultTileOverlap         = 0
 )
 
 type Viewport struct {
@@ -35,31 +46,144 @@ const (
 )
 
 type CaptureRequest struct {
-	URL               string        `json:"url" yaml:"url"`
-	OutputPath        string        `json:"output,omitempty" yaml:"output,omitempty"`
-	MetadataPath      string        `json:"metadata,omitempty" yaml:"metadata,omitempty"`
-	FullPage          bool          `json:"full_page,omitempty" yaml:"full_page,omitempty"`
-	Selector          string        `json:"selector,omitempty" yaml:"selector,omitempty"`
-	Selectors         []string      `json:"selectors,omitempty" yaml:"selectors,omitempty"`
-	SelectorAll       string        `json:"selector_all,omitempty" yaml:"selector_all,omitempty"`
-	SelectorsAll      []string      `json:"selectors_all,omitempty" yaml:"selectors_all,omitempty"`
-	Padding           int           `json:"padding,omitempty" yaml:"padding,omitempty"`
-	Wait              string        `json:"wait,omitempty" yaml:"wait,omitempty"`
-	WaitFor           string        `json:"wait_for,omitempty" yaml:"wait_for,omitempty"`
-	JavaScript        string        `json:"javascript,omitempty" yaml:"javascript,omitempty"`
-	Viewport          Viewport      `json:"viewport" yaml:"viewport,omitempty"`
-	ViewportPreset    string        `json:"viewport_preset,omitempty" yaml:"viewport_preset,omitempty"`
-	DevicePreset      string        `json:"device_preset,omitempty" yaml:"device_preset,omitempty"`
-	UserAgent         string        `json:"user_agent,omitempty" yaml:"user_agent,omitempty"`
-	Readiness         ReadinessMode `json:"readiness,omitempty" yaml:"readiness,omitempty"`
-	ReadinessIdle     string        `json:"readiness_idle,omitempty" yaml:"readiness_idle,omitempty"`
-	DisableAnimations bool          `json:"disable_animations,omitempty" yaml:"disable_animations,omitempty"`
-	ReducedMotion     bool          `json:"reduced_motion,omitempty" yaml:"reduced_motion,omitempty"`
-	WaitForFonts      bool          `json:"wait_for_fonts,omitempty" yaml:"wait_for_fonts,omitempty"`
-	BeforeNavigateJS  string        `json:"before_navigate_js,omitempty" yaml:"before_navigate_js,omitempty"`
-	AfterNavigateJS   string        `json:"after_navigate_js,omitempty" yaml:"after_navigate_js,omitempty"`
-	BeforeCaptureJS   string        `json:"before_capture_js,omitempty" yaml:"before_capture_js,omitempty"`
-	Timeout           string        `json:"timeout,omitempty" yaml:"timeout,omitempty"`
+	URL               string             `json:"url" yaml:"url"`
+	OutputPath        string             `json:"output,omitempty" yaml:"output,omitempty"`
+	MetadataPath      string             `json:"metadata,omitempty" yaml:"metadata,omitempty"`
+	FullPage          bool               `json:"full_page,omitempty" yaml:"full_page,omitempty"`
+	Selector          string             `json:"selector,omitempty" yaml:"selector,omitempty"`
+	Selectors         []string           `json:"selectors,omitempty" yaml:"selectors,omitempty"`
+	SelectorAll       string             `json:"selector_all,omitempty" yaml:"selector_all,omitempty"`
+	SelectorsAll      []string           `json:"selectors_all,omitempty" yaml:"selectors_all,omitempty"`
+	Padding           int                `json:"padding,omitempty" yaml:"padding,omitempty"`
+	Wait              string             `json:"wait,omitempty" yaml:"wait,omitempty"`
+	WaitFor           string             `json:"wait_for,omitempty" yaml:"wait_for,omitempty"`
+	JavaScript        string             `json:"javascript,omitempty" yaml:"javascript,omitempty"`
+	Viewport          Viewport           `json:"viewport" yaml:"viewport,omitempty"`
+	ViewportPreset    string             `json:"viewport_preset,omitempty" yaml:"viewport_preset,omitempty"`
+	DevicePreset      string             `json:"device_preset,omitempty" yaml:"device_preset,omitempty"`
+	UserAgent         string             `json:"user_agent,omitempty" yaml:"user_agent,omitempty"`
+	Readiness         ReadinessMode      `json:"readiness,omitempty" yaml:"readiness,omitempty"`
+	ReadinessIdle     string             `json:"readiness_idle,omitempty" yaml:"readiness_idle,omitempty"`
+	DisableAnimations bool               `json:"disable_animations,omitempty" yaml:"disable_animations,omitempty"`
+	ReducedMotion     bool               `json:"reduced_motion,omitempty" yaml:"reduced_motion,omitempty"`
+	WaitForFonts      bool               `json:"wait_for_fonts,omitempty" yaml:"wait_for_fonts,omitempty"`
+	BeforeNavigateJS  string             `json:"before_navigate_js,omitempty" yaml:"before_navigate_js,omitempty"`
+	AfterNavigateJS   string             `json:"after_navigate_js,omitempty" yaml:"after_navigate_js,omitempty"`
+	BeforeCaptureJS   string             `json:"before_capture_js,omitempty" yaml:"before_capture_js,omitempty"`
+	Timeout           string             `json:"timeout,omitempty" yaml:"timeout,omitempty"`
+	OversizePolicy    OversizePolicy     `json:"oversize_policy,omitempty" yaml:"oversize_policy,omitempty"`
+	Tile              CaptureTileOptions `json:"tile,omitempty,omitzero" yaml:"tile,omitempty"`
+}
+
+type OversizePolicy string
+
+const (
+	OversizePolicyFail OversizePolicy = "fail"
+	OversizePolicyTile OversizePolicy = "tile"
+)
+
+type CaptureTileOptions struct {
+	MaxWidth          int   `json:"max_width,omitempty" yaml:"max_width,omitempty"`
+	MaxHeight         int   `json:"max_height,omitempty" yaml:"max_height,omitempty"`
+	MaxPixels         int64 `json:"max_pixels,omitempty" yaml:"max_pixels,omitempty"`
+	MaxTargetPixels   int64 `json:"max_target_pixels,omitempty" yaml:"max_target_pixels,omitempty"`
+	Overlap           int   `json:"overlap,omitempty" yaml:"overlap,omitempty"`
+	Stitch            bool  `json:"stitch,omitempty" yaml:"stitch,omitempty"`
+	MaxStitchedPixels int64 `json:"max_stitched_pixels,omitempty" yaml:"max_stitched_pixels,omitempty"`
+	CleanupTiles      bool  `json:"cleanup_tiles,omitempty" yaml:"cleanup_tiles,omitempty"`
+	set               map[string]bool
+}
+
+func (o CaptureTileOptions) IsZero() bool {
+	return o.MaxWidth == 0 &&
+		o.MaxHeight == 0 &&
+		o.MaxPixels == 0 &&
+		o.MaxTargetPixels == 0 &&
+		o.Overlap == 0 &&
+		!o.Stitch &&
+		o.MaxStitchedPixels == 0 &&
+		!o.CleanupTiles
+}
+
+func (o CaptureTileOptions) fieldSet(name string) bool {
+	return o.set != nil && o.set[name]
+}
+
+func (o *CaptureTileOptions) UnmarshalYAML(value *yaml.Node) error {
+	type rawTileOptions struct {
+		MaxWidth          *int   `yaml:"max_width"`
+		MaxHeight         *int   `yaml:"max_height"`
+		MaxPixels         *int64 `yaml:"max_pixels"`
+		MaxTargetPixels   *int64 `yaml:"max_target_pixels"`
+		Overlap           *int   `yaml:"overlap"`
+		Stitch            *bool  `yaml:"stitch"`
+		MaxStitchedPixels *int64 `yaml:"max_stitched_pixels"`
+		CleanupTiles      *bool  `yaml:"cleanup_tiles"`
+	}
+	var raw rawTileOptions
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	applyRawTileOptions(o, raw.MaxWidth, raw.MaxHeight, raw.MaxPixels, raw.MaxTargetPixels, raw.Overlap, raw.Stitch, raw.MaxStitchedPixels, raw.CleanupTiles)
+	return nil
+}
+
+func (o *CaptureTileOptions) UnmarshalJSON(payload []byte) error {
+	type rawTileOptions struct {
+		MaxWidth          *int   `json:"max_width"`
+		MaxHeight         *int   `json:"max_height"`
+		MaxPixels         *int64 `json:"max_pixels"`
+		MaxTargetPixels   *int64 `json:"max_target_pixels"`
+		Overlap           *int   `json:"overlap"`
+		Stitch            *bool  `json:"stitch"`
+		MaxStitchedPixels *int64 `json:"max_stitched_pixels"`
+		CleanupTiles      *bool  `json:"cleanup_tiles"`
+	}
+	var raw rawTileOptions
+	if err := json.Unmarshal(payload, &raw); err != nil {
+		return err
+	}
+	applyRawTileOptions(o, raw.MaxWidth, raw.MaxHeight, raw.MaxPixels, raw.MaxTargetPixels, raw.Overlap, raw.Stitch, raw.MaxStitchedPixels, raw.CleanupTiles)
+	return nil
+}
+
+func applyRawTileOptions(o *CaptureTileOptions, maxWidth, maxHeight *int, maxPixels, maxTargetPixels *int64, overlap *int, stitch *bool, maxStitchedPixels *int64, cleanupTiles *bool) {
+	if o == nil {
+		return
+	}
+	o.set = map[string]bool{}
+	if maxWidth != nil {
+		o.MaxWidth = *maxWidth
+		o.set["max_width"] = true
+	}
+	if maxHeight != nil {
+		o.MaxHeight = *maxHeight
+		o.set["max_height"] = true
+	}
+	if maxPixels != nil {
+		o.MaxPixels = *maxPixels
+		o.set["max_pixels"] = true
+	}
+	if maxTargetPixels != nil {
+		o.MaxTargetPixels = *maxTargetPixels
+		o.set["max_target_pixels"] = true
+	}
+	if overlap != nil {
+		o.Overlap = *overlap
+		o.set["overlap"] = true
+	}
+	if stitch != nil {
+		o.Stitch = *stitch
+		o.set["stitch"] = true
+	}
+	if maxStitchedPixels != nil {
+		o.MaxStitchedPixels = *maxStitchedPixels
+		o.set["max_stitched_pixels"] = true
+	}
+	if cleanupTiles != nil {
+		o.CleanupTiles = *cleanupTiles
+		o.set["cleanup_tiles"] = true
+	}
 }
 
 type CaptureMode string
@@ -78,6 +202,58 @@ type Bounds struct {
 	Y      float64 `json:"y"`
 	Width  float64 `json:"width"`
 	Height float64 `json:"height"`
+}
+
+type CaptureTileStatus string
+
+const (
+	CaptureTilePending   CaptureTileStatus = "pending"
+	CaptureTileCompleted CaptureTileStatus = "completed"
+	CaptureTileFailed    CaptureTileStatus = "failed"
+)
+
+type CaptureTilingStatus string
+
+const (
+	CaptureTilingComplete CaptureTilingStatus = "complete"
+	CaptureTilingPartial  CaptureTilingStatus = "partial"
+	CaptureTilingFailed   CaptureTilingStatus = "failed"
+)
+
+type CaptureTileLimits struct {
+	MaxWidth          int     `json:"max_width"`
+	MaxHeight         int     `json:"max_height"`
+	MaxPixels         int64   `json:"max_pixels"`
+	MaxTargetPixels   int64   `json:"max_target_pixels"`
+	MaxStitchedPixels int64   `json:"max_stitched_pixels"`
+	Overlap           int     `json:"overlap"`
+	ScaleFactor       float64 `json:"scale_factor"`
+}
+
+type CaptureTile struct {
+	Index             int               `json:"index"`
+	Row               int               `json:"row"`
+	Column            int               `json:"column"`
+	SourceBounds      Bounds            `json:"source_bounds"`
+	DestinationBounds *Bounds           `json:"destination_bounds,omitempty"`
+	OutputPath        string            `json:"output_path,omitempty"`
+	ByteSize          int               `json:"byte_size,omitempty"`
+	Status            CaptureTileStatus `json:"status"`
+	Error             string            `json:"error,omitempty"`
+	Bytes             []byte            `json:"-"`
+}
+
+type CaptureTiling struct {
+	Status         CaptureTilingStatus `json:"status"`
+	TargetBounds   Bounds              `json:"target_bounds"`
+	Limits         CaptureTileLimits   `json:"limits"`
+	TileCount      int                 `json:"tile_count"`
+	CompletedCount int                 `json:"completed_count"`
+	FailedCount    int                 `json:"failed_count"`
+	MetadataPath   string              `json:"metadata_path,omitempty"`
+	StitchedPath   string              `json:"stitched_path,omitempty"`
+	Tiles          []CaptureTile       `json:"tiles,omitempty"`
+	Warnings       []CaptureWarning    `json:"warnings,omitempty"`
 }
 
 type CaptureArtifact struct {
@@ -138,6 +314,7 @@ type CaptureResult struct {
 	Browser        BrowserInfo          `json:"browser"`
 	Timing         CaptureTiming        `json:"timing"`
 	Warnings       []CaptureWarning     `json:"warnings,omitempty"`
+	Tiling         *CaptureTiling       `json:"tiling,omitempty"`
 	Normalization  CaptureNormalization `json:"normalization"`
 	ResolvedConfig CaptureRequest       `json:"resolved_config"`
 }
@@ -147,44 +324,48 @@ type BatchResult struct {
 }
 
 type Manifest struct {
-	OutputDir         string         `json:"output_dir,omitempty" yaml:"output_dir,omitempty"`
-	Viewport          *Viewport      `json:"viewport,omitempty" yaml:"viewport,omitempty"`
-	ViewportPreset    string         `json:"viewport_preset,omitempty" yaml:"viewport_preset,omitempty"`
-	DevicePreset      string         `json:"device_preset,omitempty" yaml:"device_preset,omitempty"`
-	Wait              string         `json:"wait,omitempty" yaml:"wait,omitempty"`
-	WaitFor           string         `json:"wait_for,omitempty" yaml:"wait_for,omitempty"`
-	Readiness         ReadinessMode  `json:"readiness,omitempty" yaml:"readiness,omitempty"`
-	ReadinessIdle     string         `json:"readiness_idle,omitempty" yaml:"readiness_idle,omitempty"`
-	DisableAnimations bool           `json:"disable_animations,omitempty" yaml:"disable_animations,omitempty"`
-	ReducedMotion     bool           `json:"reduced_motion,omitempty" yaml:"reduced_motion,omitempty"`
-	WaitForFonts      bool           `json:"wait_for_fonts,omitempty" yaml:"wait_for_fonts,omitempty"`
-	Timeout           string         `json:"timeout,omitempty" yaml:"timeout,omitempty"`
-	Shots             []ManifestShot `json:"shots" yaml:"shots"`
+	OutputDir         string             `json:"output_dir,omitempty" yaml:"output_dir,omitempty"`
+	Viewport          *Viewport          `json:"viewport,omitempty" yaml:"viewport,omitempty"`
+	ViewportPreset    string             `json:"viewport_preset,omitempty" yaml:"viewport_preset,omitempty"`
+	DevicePreset      string             `json:"device_preset,omitempty" yaml:"device_preset,omitempty"`
+	Wait              string             `json:"wait,omitempty" yaml:"wait,omitempty"`
+	WaitFor           string             `json:"wait_for,omitempty" yaml:"wait_for,omitempty"`
+	Readiness         ReadinessMode      `json:"readiness,omitempty" yaml:"readiness,omitempty"`
+	ReadinessIdle     string             `json:"readiness_idle,omitempty" yaml:"readiness_idle,omitempty"`
+	DisableAnimations bool               `json:"disable_animations,omitempty" yaml:"disable_animations,omitempty"`
+	ReducedMotion     bool               `json:"reduced_motion,omitempty" yaml:"reduced_motion,omitempty"`
+	WaitForFonts      bool               `json:"wait_for_fonts,omitempty" yaml:"wait_for_fonts,omitempty"`
+	Timeout           string             `json:"timeout,omitempty" yaml:"timeout,omitempty"`
+	OversizePolicy    OversizePolicy     `json:"oversize_policy,omitempty" yaml:"oversize_policy,omitempty"`
+	Tile              CaptureTileOptions `json:"tile,omitempty,omitzero" yaml:"tile,omitempty"`
+	Shots             []ManifestShot     `json:"shots" yaml:"shots"`
 }
 
 type ManifestShot struct {
-	ID                string        `json:"id,omitempty" yaml:"id,omitempty"`
-	URL               string        `json:"url" yaml:"url"`
-	Output            string        `json:"output,omitempty" yaml:"output,omitempty"`
-	Metadata          string        `json:"metadata,omitempty" yaml:"metadata,omitempty"`
-	FullPage          bool          `json:"full_page,omitempty" yaml:"full_page,omitempty"`
-	Selector          string        `json:"selector,omitempty" yaml:"selector,omitempty"`
-	Selectors         []string      `json:"selectors,omitempty" yaml:"selectors,omitempty"`
-	SelectorAll       string        `json:"selector_all,omitempty" yaml:"selector_all,omitempty"`
-	SelectorsAll      []string      `json:"selectors_all,omitempty" yaml:"selectors_all,omitempty"`
-	Padding           int           `json:"padding,omitempty" yaml:"padding,omitempty"`
-	Wait              string        `json:"wait,omitempty" yaml:"wait,omitempty"`
-	WaitFor           string        `json:"wait_for,omitempty" yaml:"wait_for,omitempty"`
-	JavaScript        string        `json:"javascript,omitempty" yaml:"javascript,omitempty"`
-	Viewport          *Viewport     `json:"viewport,omitempty" yaml:"viewport,omitempty"`
-	ViewportPreset    string        `json:"viewport_preset,omitempty" yaml:"viewport_preset,omitempty"`
-	DevicePreset      string        `json:"device_preset,omitempty" yaml:"device_preset,omitempty"`
-	Readiness         ReadinessMode `json:"readiness,omitempty" yaml:"readiness,omitempty"`
-	ReadinessIdle     string        `json:"readiness_idle,omitempty" yaml:"readiness_idle,omitempty"`
-	DisableAnimations bool          `json:"disable_animations,omitempty" yaml:"disable_animations,omitempty"`
-	ReducedMotion     bool          `json:"reduced_motion,omitempty" yaml:"reduced_motion,omitempty"`
-	WaitForFonts      bool          `json:"wait_for_fonts,omitempty" yaml:"wait_for_fonts,omitempty"`
-	Timeout           string        `json:"timeout,omitempty" yaml:"timeout,omitempty"`
+	ID                string             `json:"id,omitempty" yaml:"id,omitempty"`
+	URL               string             `json:"url" yaml:"url"`
+	Output            string             `json:"output,omitempty" yaml:"output,omitempty"`
+	Metadata          string             `json:"metadata,omitempty" yaml:"metadata,omitempty"`
+	FullPage          bool               `json:"full_page,omitempty" yaml:"full_page,omitempty"`
+	Selector          string             `json:"selector,omitempty" yaml:"selector,omitempty"`
+	Selectors         []string           `json:"selectors,omitempty" yaml:"selectors,omitempty"`
+	SelectorAll       string             `json:"selector_all,omitempty" yaml:"selector_all,omitempty"`
+	SelectorsAll      []string           `json:"selectors_all,omitempty" yaml:"selectors_all,omitempty"`
+	Padding           int                `json:"padding,omitempty" yaml:"padding,omitempty"`
+	Wait              string             `json:"wait,omitempty" yaml:"wait,omitempty"`
+	WaitFor           string             `json:"wait_for,omitempty" yaml:"wait_for,omitempty"`
+	JavaScript        string             `json:"javascript,omitempty" yaml:"javascript,omitempty"`
+	Viewport          *Viewport          `json:"viewport,omitempty" yaml:"viewport,omitempty"`
+	ViewportPreset    string             `json:"viewport_preset,omitempty" yaml:"viewport_preset,omitempty"`
+	DevicePreset      string             `json:"device_preset,omitempty" yaml:"device_preset,omitempty"`
+	Readiness         ReadinessMode      `json:"readiness,omitempty" yaml:"readiness,omitempty"`
+	ReadinessIdle     string             `json:"readiness_idle,omitempty" yaml:"readiness_idle,omitempty"`
+	DisableAnimations bool               `json:"disable_animations,omitempty" yaml:"disable_animations,omitempty"`
+	ReducedMotion     bool               `json:"reduced_motion,omitempty" yaml:"reduced_motion,omitempty"`
+	WaitForFonts      bool               `json:"wait_for_fonts,omitempty" yaml:"wait_for_fonts,omitempty"`
+	Timeout           string             `json:"timeout,omitempty" yaml:"timeout,omitempty"`
+	OversizePolicy    OversizePolicy     `json:"oversize_policy,omitempty" yaml:"oversize_policy,omitempty"`
+	Tile              CaptureTileOptions `json:"tile,omitempty,omitzero" yaml:"tile,omitempty"`
 }
 
 type EngineResult struct {
@@ -192,6 +373,7 @@ type EngineResult struct {
 	Browser  BrowserInfo      `json:"browser"`
 	Timing   CaptureTiming    `json:"timing"`
 	Warnings []CaptureWarning `json:"warnings,omitempty"`
+	Tiling   *CaptureTiling   `json:"tiling,omitempty"`
 }
 
 func NormalizeCaptureRequest(req CaptureRequest) (CaptureRequest, error) {
@@ -208,6 +390,7 @@ func NormalizeCaptureRequest(req CaptureRequest) (CaptureRequest, error) {
 	if req.Readiness == "" {
 		req.Readiness = defaultReadinessMode
 	}
+	normalizeTileOptions(&req)
 	if err := validateCaptureRequest(req); err != nil {
 		return CaptureRequest{}, err
 	}
@@ -229,6 +412,7 @@ func trimCaptureRequest(req CaptureRequest) CaptureRequest {
 	req.AfterNavigateJS = strings.TrimSpace(req.AfterNavigateJS)
 	req.BeforeCaptureJS = strings.TrimSpace(req.BeforeCaptureJS)
 	req.Timeout = strings.TrimSpace(req.Timeout)
+	req.OversizePolicy = OversizePolicy(strings.TrimSpace(strings.ToLower(string(req.OversizePolicy))))
 	req.ViewportPreset = normalizePresetName(req.ViewportPreset)
 	req.DevicePreset = normalizePresetName(req.DevicePreset)
 	req.UserAgent = strings.TrimSpace(req.UserAgent)
@@ -251,7 +435,70 @@ func validateCaptureRequest(req CaptureRequest) error {
 	if err := validateCaptureDurations(req); err != nil {
 		return err
 	}
+	if err := validateTileOptions(req); err != nil {
+		return err
+	}
 	return validateTargetMode(req)
+}
+
+func normalizeTileOptions(req *CaptureRequest) {
+}
+
+func validateTileOptions(req CaptureRequest) error {
+	switch effectiveOversizePolicy(req) {
+	case OversizePolicyFail, OversizePolicyTile:
+	default:
+		return newCaptureError(CodeValidation, "normalize_request", fmt.Sprintf("unsupported oversize policy %q", req.OversizePolicy), nil)
+	}
+	tile := effectiveTileOptions(req.Tile)
+	if tile.MaxWidth <= 0 {
+		return newCaptureError(CodeValidation, "normalize_request", "tile max_width must be > 0", nil)
+	}
+	if tile.MaxHeight <= 0 {
+		return newCaptureError(CodeValidation, "normalize_request", "tile max_height must be > 0", nil)
+	}
+	if tile.MaxPixels <= 0 {
+		return newCaptureError(CodeValidation, "normalize_request", "tile max_pixels must be > 0", nil)
+	}
+	if tile.MaxTargetPixels <= 0 {
+		return newCaptureError(CodeValidation, "normalize_request", "tile max_target_pixels must be > 0", nil)
+	}
+	if tile.MaxStitchedPixels <= 0 {
+		return newCaptureError(CodeValidation, "normalize_request", "tile max_stitched_pixels must be > 0", nil)
+	}
+	if tile.Overlap < 0 {
+		return newCaptureError(CodeValidation, "normalize_request", "tile overlap must be >= 0", nil)
+	}
+	if tile.Overlap >= tile.MaxWidth || tile.Overlap >= tile.MaxHeight {
+		return newCaptureError(CodeValidation, "normalize_request", "tile overlap must be smaller than max_width and max_height", nil)
+	}
+	return nil
+}
+
+func effectiveOversizePolicy(req CaptureRequest) OversizePolicy {
+	if req.OversizePolicy == "" {
+		return DefaultOversizePolicy
+	}
+	return req.OversizePolicy
+}
+
+func effectiveTileOptions(tile CaptureTileOptions) CaptureTileOptions {
+	if tile.MaxWidth == 0 {
+		tile.MaxWidth = DefaultTileMaxWidth
+	}
+	if tile.MaxHeight == 0 {
+		tile.MaxHeight = DefaultTileMaxHeight
+	}
+	if tile.MaxPixels == 0 {
+		tile.MaxPixels = DefaultTileMaxPixels
+	}
+	if tile.MaxTargetPixels == 0 {
+		tile.MaxTargetPixels = DefaultTileMaxTargetPixels
+	}
+	if tile.MaxStitchedPixels == 0 {
+		tile.MaxStitchedPixels = DefaultTileMaxStitchPixels
+	}
+	return tile
 }
 
 func validateCaptureDurations(req CaptureRequest) error {

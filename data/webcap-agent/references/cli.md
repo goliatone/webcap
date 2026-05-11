@@ -2,31 +2,36 @@
 
 Use the CLI as a fallback when MCP tools are not available or when a reproducible command is useful.
 
+Result commands print human summaries by default. Add `--json` or `--format json` when an agent or script needs structured output. Add `--no-color` for deterministic redirected output.
+
 ## Single screenshot
 
 ```bash
-webcap shot http://localhost:3000 \
+webcap shot \
+  --json \
   --viewport-preset desktop-xl \
   --readiness complete \
   --disable-animations \
   --reduced-motion \
   --wait-for-fonts \
-  --output artifacts/current/home.png
+  --output artifacts/current/home.png \
+  http://localhost:3000
 ```
 
 For a component or region:
 
 ```bash
-webcap shot http://localhost:3000 \
+webcap shot \
   --selector ".checkout-panel" \
   --padding 16 \
-  --output artifacts/current/checkout-panel.png
+  --output artifacts/current/checkout-panel.png \
+  http://localhost:3000
 ```
 
 ## Manifest capture
 
 ```bash
-webcap multi ./webcap.yaml --output-dir artifacts/current
+webcap multi --output-dir artifacts/current ./webcap.yaml
 ```
 
 Use manifests for repeatable multi-screen capture. Keep output paths stable so reports and diffs can be compared between runs.
@@ -34,29 +39,32 @@ Use manifests for repeatable multi-screen capture. Keep output paths stable so r
 ## Pixel diff
 
 ```bash
-webcap diff artifacts/reference/home.png artifacts/current/home.png \
+webcap diff \
   --threshold 0.05 \
   --output artifacts/diff/home.png \
-  --metadata artifacts/diff/home.json
+  --metadata artifacts/diff/home.json \
+  artifacts/reference/home.png artifacts/current/home.png
 ```
 
 ## Semantic diff
 
 ```bash
-OPENAI_API_KEY=... webcap semantic-diff artifacts/current/home.png artifacts/reference/home.png \
+OPENAI_API_KEY=... webcap semantic-diff \
+  --json \
   --provider openai \
   --model gpt-5.1 \
   --mode focused \
   --focus "primary CTA,nav labels,form state" \
   --pixel-diff-image artifacts/diff/home.png \
-  --metadata artifacts/semantic/home.json
+  --metadata artifacts/semantic/home.json \
+  artifacts/current/home.png artifacts/reference/home.png
 ```
 
 ## Workflow report
 
 ```bash
-webcap workflow capture-scenario ./workflow.yaml --run-report
-webcap report scenario ./workflow.yaml
+webcap workflow capture-scenario --run-report ./workflow.yaml
+webcap report scenario --json ./workflow.yaml
 ```
 
 Use workflow reports for multi-step UI reviews where each screen has stable identifiers, reference images, and review policy.

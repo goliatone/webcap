@@ -13,6 +13,8 @@ Prefer the `webcap` MCP tools when they are available in the current agent runti
 
 Use the `webcap` CLI when MCP tools are not available, when you need a reproducible command for a report, or when the user explicitly asks for terminal commands.
 
+CLI result commands print human summaries by default. Use `--json` or `--format json` for machine-readable output, and use `--no-color` when capturing output for tests, scripts, or logs.
+
 ## Capture defaults
 
 For deterministic captures, set a fixed viewport or viewport preset, disable animations, use reduced motion, and wait for fonts. Use `network_idle` readiness only when the page has a stable network boundary; otherwise use selector waits for the UI state that matters.

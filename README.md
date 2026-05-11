@@ -4,6 +4,15 @@
 
 ## Install
 
+Install the released binary with Homebrew:
+
+```bash
+brew tap goliatone/homebrew-tap
+brew install webcap
+```
+
+Or install from source with Go:
+
 ```bash
 go install github.com/goliatone/webcap/cmd/webcap@latest
 ```

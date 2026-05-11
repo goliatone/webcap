@@ -13,6 +13,7 @@ import (
 
 type cliInvocation struct {
 	Command  string
+	Output   outputOptions
 	Shot     shotOptions
 	Multi    multiOptions
 	Diff     diffOptions
@@ -23,6 +24,21 @@ type cliInvocation struct {
 	Skill    skillOptions
 	Browser  browserOptions
 	Provider semanticProviderOptions
+}
+
+type outputOptions struct {
+	Format  string
+	JSON    bool
+	NoColor bool
+}
+
+type cliParseError struct {
+	Message string
+	Output  outputOptions
+}
+
+func (e cliParseError) Error() string {
+	return strings.TrimSpace(e.Message)
 }
 
 type browserOptions struct {
@@ -144,9 +160,10 @@ func parseShotCLI(args []string) (cliInvocation, error) {
 		viewport     string
 	)
 
-	invocation := cliInvocation{Command: "shot"}
+	invocation := cliInvocation{Command: "shot", Output: defaultOutputOptions()}
 	fs := flag.NewFlagSet("webcap shot", flag.ContinueOnError)
 	fs.SetOutput(&stderr)
+	registerOutputFlags(fs, &invocation.Output)
 	registerBrowserFlags(fs, &invocation.Browser)
 	fs.StringVar(&outputPath, "output", "", "Output image path.")
 	fs.StringVar(&metadataPath, "metadata", "", "Optional metadata sidecar path.")
@@ -170,15 +187,14 @@ func parseShotCLI(args []string) (cliInvocation, error) {
 	fs.BoolVar(&invocation.Shot.Request.WaitForFonts, "wait-for-fonts", false, "Wait for document fonts to finish loading before capture.")
 
 	if err := fs.Parse(args); err != nil {
-		message := strings.TrimSpace(stderr.String())
-		if message == "" {
-			message = err.Error()
-		}
-		return cliInvocation{}, errors.New(message)
+		return cliInvocation{}, parseError(err, stderr.String(), invocation.Output)
+	}
+	if err := normalizeOutputOptions(&invocation.Output); err != nil {
+		return cliInvocation{}, cliParseError{Message: err.Error(), Output: invocation.Output}
 	}
 	recordVisitedBrowserFlags(fs, &invocation.Browser)
 	if len(fs.Args()) != 1 {
-		return cliInvocation{}, errors.New("shot requires exactly one positional url argument")
+		return cliInvocation{}, cliParseError{Message: "shot requires exactly one positional url argument", Output: invocation.Output}
 	}
 
 	invocation.Shot.Request.URL = strings.TrimSpace(fs.Args()[0])
@@ -189,7 +205,7 @@ func parseShotCLI(args []string) (cliInvocation, error) {
 
 	parsedViewport, err := parseViewport(viewport)
 	if err != nil {
-		return cliInvocation{}, err
+		return cliInvocation{}, cliParseError{Message: err.Error(), Output: invocation.Output}
 	}
 	invocation.Shot.Request.Viewport = parsedViewport
 
@@ -199,21 +215,21 @@ func parseShotCLI(args []string) (cliInvocation, error) {
 func parseMultiCLI(args []string) (cliInvocation, error) {
 	var stderr bytes.Buffer
 
-	invocation := cliInvocation{Command: "multi"}
+	invocation := cliInvocation{Command: "multi", Output: defaultOutputOptions()}
 	fs := flag.NewFlagSet("webcap multi", flag.ContinueOnError)
 	fs.SetOutput(&stderr)
+	registerOutputFlags(fs, &invocation.Output)
 	registerBrowserFlags(fs, &invocation.Browser)
 	fs.StringVar(&invocation.Multi.OutputDir, "output-dir", "", "Override manifest output_dir.")
 	if err := fs.Parse(args); err != nil {
-		message := strings.TrimSpace(stderr.String())
-		if message == "" {
-			message = err.Error()
-		}
-		return cliInvocation{}, errors.New(message)
+		return cliInvocation{}, parseError(err, stderr.String(), invocation.Output)
+	}
+	if err := normalizeOutputOptions(&invocation.Output); err != nil {
+		return cliInvocation{}, cliParseError{Message: err.Error(), Output: invocation.Output}
 	}
 	recordVisitedBrowserFlags(fs, &invocation.Browser)
 	if len(fs.Args()) != 1 {
-		return cliInvocation{}, errors.New("multi requires exactly one manifest path")
+		return cliInvocation{}, cliParseError{Message: "multi requires exactly one manifest path", Output: invocation.Output}
 	}
 	invocation.Multi.ManifestPath = strings.TrimSpace(fs.Args()[0])
 	return invocation, nil
@@ -226,21 +242,21 @@ func parseDiffCLI(args []string) (cliInvocation, error) {
 		metadataPath string
 	)
 
-	invocation := cliInvocation{Command: "diff"}
+	invocation := cliInvocation{Command: "diff", Output: defaultOutputOptions()}
 	fs := flag.NewFlagSet("webcap diff", flag.ContinueOnError)
 	fs.SetOutput(&stderr)
+	registerOutputFlags(fs, &invocation.Output)
 	fs.StringVar(&outputPath, "output", "", "Output diff image path or diff directory.")
 	fs.StringVar(&metadataPath, "metadata", "", "Optional metadata sidecar path.")
 	fs.Float64Var(&invocation.Diff.Request.Threshold, "threshold", 0, "Per-channel normalized threshold from 0 to 1.")
 	if err := fs.Parse(args); err != nil {
-		message := strings.TrimSpace(stderr.String())
-		if message == "" {
-			message = err.Error()
-		}
-		return cliInvocation{}, errors.New(message)
+		return cliInvocation{}, parseError(err, stderr.String(), invocation.Output)
+	}
+	if err := normalizeOutputOptions(&invocation.Output); err != nil {
+		return cliInvocation{}, cliParseError{Message: err.Error(), Output: invocation.Output}
 	}
 	if len(fs.Args()) != 2 {
-		return cliInvocation{}, errors.New("diff requires base and compare paths")
+		return cliInvocation{}, cliParseError{Message: "diff requires base and compare paths", Output: invocation.Output}
 	}
 	invocation.Diff.Request.BasePath = strings.TrimSpace(fs.Args()[0])
 	invocation.Diff.Request.ComparePath = strings.TrimSpace(fs.Args()[1])
@@ -257,9 +273,10 @@ func parseSemanticDiffCLI(args []string) (cliInvocation, error) {
 		threshold     float64
 	)
 
-	invocation := cliInvocation{Command: "semantic-diff"}
+	invocation := cliInvocation{Command: "semantic-diff", Output: defaultOutputOptions()}
 	fs := flag.NewFlagSet("webcap semantic-diff", flag.ContinueOnError)
 	fs.SetOutput(&stderr)
+	registerOutputFlags(fs, &invocation.Output)
 	registerSemanticProviderFlags(fs, &invocation.Provider)
 	fs.StringVar(&invocation.Semantic.Request.Provider, "provider", "", "Semantic diff provider: openai, anthropic, or codex-cli.")
 	fs.StringVar(&invocation.Semantic.Request.Model, "model", "", "Provider model name.")
@@ -278,14 +295,13 @@ func parseSemanticDiffCLI(args []string) (cliInvocation, error) {
 	fs.Float64Var(&invocation.Semantic.Request.PixelContext.ChangedPercent, "changed-percent", 0, "Existing pixel diff changed percent.")
 	fs.Float64Var(&threshold, "threshold", 0, "Existing pixel diff threshold.")
 	if err := fs.Parse(args); err != nil {
-		message := strings.TrimSpace(stderr.String())
-		if message == "" {
-			message = err.Error()
-		}
-		return cliInvocation{}, errors.New(message)
+		return cliInvocation{}, parseError(err, stderr.String(), invocation.Output)
+	}
+	if err := normalizeOutputOptions(&invocation.Output); err != nil {
+		return cliInvocation{}, cliParseError{Message: err.Error(), Output: invocation.Output}
 	}
 	if len(fs.Args()) != 2 {
-		return cliInvocation{}, errors.New("semantic-diff requires current and reference image paths")
+		return cliInvocation{}, cliParseError{Message: "semantic-diff requires current and reference image paths", Output: invocation.Output}
 	}
 	invocation.Semantic.Request.CurrentPath = strings.TrimSpace(fs.Args()[0])
 	invocation.Semantic.Request.ReferencePath = strings.TrimSpace(fs.Args()[1])
@@ -355,30 +371,31 @@ func parseSkillInstallCLI(args []string) (cliInvocation, error) {
 
 	invocation := cliInvocation{
 		Command: "skill",
+		Output:  defaultOutputOptions(),
 		Skill: skillOptions{
 			Action: "install",
 		},
 	}
 	fs := flag.NewFlagSet("webcap skill install", flag.ContinueOnError)
 	fs.SetOutput(&stderr)
+	registerOutputFlags(fs, &invocation.Output)
 	fs.StringVar(&agent, "agent", "", "Agent to install for: codex or claude.")
 	fs.BoolVar(&invocation.Skill.Force, "force", false, "Replace conflicting installed skill files.")
 	if err := fs.Parse(args); err != nil {
-		message := strings.TrimSpace(stderr.String())
-		if message == "" {
-			message = err.Error()
-		}
-		return cliInvocation{}, errors.New(message)
+		return cliInvocation{}, parseError(err, stderr.String(), invocation.Output)
+	}
+	if err := normalizeOutputOptions(&invocation.Output); err != nil {
+		return cliInvocation{}, cliParseError{Message: err.Error(), Output: invocation.Output}
 	}
 	if len(fs.Args()) != 0 {
-		return cliInvocation{}, errors.New("skill install does not accept positional arguments")
+		return cliInvocation{}, cliParseError{Message: "skill install does not accept positional arguments", Output: invocation.Output}
 	}
 	if strings.TrimSpace(agent) == "" {
-		return cliInvocation{}, errors.New("skill install requires --agent codex or --agent claude")
+		return cliInvocation{}, cliParseError{Message: "skill install requires --agent codex or --agent claude", Output: invocation.Output}
 	}
 	parsedAgent, err := skills.ParseAgent(agent)
 	if err != nil {
-		return cliInvocation{}, err
+		return cliInvocation{}, cliParseError{Message: err.Error(), Output: invocation.Output}
 	}
 	invocation.Skill.Agent = parsedAgent
 	return invocation, nil
@@ -401,25 +418,26 @@ func parseWorkflowCaptureCLI(args []string) (cliInvocation, error) {
 
 	invocation := cliInvocation{
 		Command: "workflow",
+		Output:  defaultOutputOptions(),
 		Workflow: workflowOptions{
 			Action: "capture",
 		},
 	}
 	fs := flag.NewFlagSet("webcap workflow capture", flag.ContinueOnError)
 	fs.SetOutput(&stderr)
+	registerOutputFlags(fs, &invocation.Output)
 	registerBrowserFlags(fs, &invocation.Browser)
 	registerSemanticProviderFlags(fs, &invocation.Provider)
 	fs.BoolVar(&invocation.Workflow.RunReport, "run-report", false, "Generate the workflow report after captures finish.")
 	if err := fs.Parse(args); err != nil {
-		message := strings.TrimSpace(stderr.String())
-		if message == "" {
-			message = err.Error()
-		}
-		return cliInvocation{}, errors.New(message)
+		return cliInvocation{}, parseError(err, stderr.String(), invocation.Output)
+	}
+	if err := normalizeOutputOptions(&invocation.Output); err != nil {
+		return cliInvocation{}, cliParseError{Message: err.Error(), Output: invocation.Output}
 	}
 	recordVisitedBrowserFlags(fs, &invocation.Browser)
 	if len(fs.Args()) != 1 {
-		return cliInvocation{}, errors.New("workflow capture-scenario requires exactly one scenario path")
+		return cliInvocation{}, cliParseError{Message: "workflow capture-scenario requires exactly one scenario path", Output: invocation.Output}
 	}
 	invocation.Workflow.ScenarioPath = strings.TrimSpace(fs.Args()[0])
 	return invocation, nil
@@ -442,25 +460,65 @@ func parseReportScenarioCLI(args []string) (cliInvocation, error) {
 
 	invocation := cliInvocation{
 		Command: "report",
+		Output:  defaultOutputOptions(),
 		Report: reportOptions{
 			Action: "generate",
 		},
 	}
 	fs := flag.NewFlagSet("webcap report", flag.ContinueOnError)
 	fs.SetOutput(&stderr)
+	registerOutputFlags(fs, &invocation.Output)
 	registerSemanticProviderFlags(fs, &invocation.Provider)
 	if err := fs.Parse(args); err != nil {
-		message := strings.TrimSpace(stderr.String())
-		if message == "" {
-			message = err.Error()
-		}
-		return cliInvocation{}, errors.New(message)
+		return cliInvocation{}, parseError(err, stderr.String(), invocation.Output)
+	}
+	if err := normalizeOutputOptions(&invocation.Output); err != nil {
+		return cliInvocation{}, cliParseError{Message: err.Error(), Output: invocation.Output}
 	}
 	if len(fs.Args()) != 1 {
-		return cliInvocation{}, errors.New("report scenario requires exactly one scenario path")
+		return cliInvocation{}, cliParseError{Message: "report scenario requires exactly one scenario path", Output: invocation.Output}
 	}
 	invocation.Report.ScenarioPath = strings.TrimSpace(fs.Args()[0])
 	return invocation, nil
+}
+
+func defaultOutputOptions() outputOptions {
+	return outputOptions{Format: "human"}
+}
+
+func registerOutputFlags(fs *flag.FlagSet, output *outputOptions) {
+	fs.BoolVar(&output.JSON, "json", false, "Render machine-readable JSON output.")
+	fs.StringVar(&output.Format, "format", output.Format, "Output format: human or json.")
+	fs.BoolVar(&output.NoColor, "no-color", false, "Disable terminal color styling.")
+}
+
+func normalizeOutputOptions(output *outputOptions) error {
+	output.Format = strings.TrimSpace(strings.ToLower(output.Format))
+	if output.Format == "" {
+		output.Format = "human"
+	}
+	if output.JSON {
+		if output.Format != "human" && output.Format != "json" {
+			invalid := output.Format
+			output.Format = "json"
+			return fmt.Errorf("unsupported output format %q", invalid)
+		}
+		output.Format = "json"
+	}
+	switch output.Format {
+	case "human", "json":
+		return nil
+	default:
+		return fmt.Errorf("unsupported output format %q", output.Format)
+	}
+}
+
+func parseError(err error, stderr string, output outputOptions) error {
+	message := strings.TrimSpace(stderr)
+	if message == "" && err != nil {
+		message = err.Error()
+	}
+	return cliParseError{Message: message, Output: output}
 }
 
 func registerBrowserFlags(fs *flag.FlagSet, browser *browserOptions) {

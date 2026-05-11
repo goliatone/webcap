@@ -1,10 +1,31 @@
 # Changelog
 
+# [0.3.0](https://github.com/goliatone/webcap/compare/v0.2.0...v0.3.0) - (2026-05-11)
+
+## <!-- 1 -->🐛 Bug Fixes
+
+- Use help command ([d81e0bf](https://github.com/goliatone/webcap/commit/d81e0bf3eb49d3aed0e560fe0004e0866b0363f1))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- Presentation capture ([c156551](https://github.com/goliatone/webcap/commit/c156551c5bd5eba132109c99fd575f971a5650bd))  - (goliatone)
+- Updated skills ([8ee2f7f](https://github.com/goliatone/webcap/commit/8ee2f7f5e828831fe6067de3c56282da841455e5))  - (goliatone)
+- Cli webcap output format ([bb1b207](https://github.com/goliatone/webcap/commit/bb1b2072d283a61c8b9e79b4baea752ae1a0b766))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update readme ([711cf08](https://github.com/goliatone/webcap/commit/711cf08e5e77f1b40f38c0e0d4203ab5a76b28b1))  - (goliatone)
+- Update tests ([da87dce](https://github.com/goliatone/webcap/commit/da87dceb43b193078cc5eb94e9a8b5904077b45d))  - (goliatone)
+
 # [0.2.0](https://github.com/goliatone/webcap/tree/v0.2.0) - (2026-05-11)
 
 ## <!-- 1 -->🐛 Bug Fixes
 
 - Agent skill install refinement ([5fbcbc7](https://github.com/goliatone/webcap/commit/5fbcbc743648fbf2a1d29fb125f149287e5babae))  - (goliatone)
+
+## <!-- 12 -->🔖 Releases
+
+- V0.2.0 ([9fca3bd](https://github.com/goliatone/webcap/commit/9fca3bdc10e7bac27043c1fd8d9195e3bc552d6d))  - (goliatone)
 
 ## <!-- 16 -->➕ Add
 

@@ -24,6 +24,21 @@ func ErrorEnvelopeFrom(err error) ErrorEnvelope {
 		envelope.Message = "unknown error"
 	}
 
+	var partialErr *pkgwebcap.PartialCaptureError
+	if errors.As(err, &partialErr) {
+		envelope.Code = string(pkgwebcap.CodePartialCapture)
+		envelope.Operation = partialErr.Operation
+		envelope.Metadata = map[string]any{
+			"failed_tile_index": partialErr.FailedTileIndex,
+			"completed_count":   partialErr.CompletedCount,
+			"total_count":       partialErr.TotalCount,
+		}
+		if partialErr.Result != nil {
+			envelope.Metadata["result"] = partialErr.Result
+		}
+		return envelope
+	}
+
 	var captureErr *pkgwebcap.Error
 	if errors.As(err, &captureErr) {
 		envelope.Message = captureErr.Message
@@ -58,6 +73,41 @@ func ErrorEnvelopeFrom(err error) ErrorEnvelope {
 }
 
 func writeHumanError(w io.Writer, err error) error {
+	var partialErr *pkgwebcap.PartialCaptureError
+	if errors.As(err, &partialErr) {
+		if _, writeErr := fmt.Fprintf(w, "Error: %s\n", strings.TrimSpace(fmt.Sprint(err))); writeErr != nil {
+			return writeErr
+		}
+		if _, writeErr := fmt.Fprintf(w, "Failed tile: %d\n", partialErr.FailedTileIndex); writeErr != nil {
+			return writeErr
+		}
+		if _, writeErr := fmt.Fprintf(w, "Tiles: %d/%d completed\n", partialErr.CompletedCount, partialErr.TotalCount); writeErr != nil {
+			return writeErr
+		}
+		if partialErr.Result != nil {
+			if partialErr.Result.MetadataPath != "" {
+				if _, writeErr := fmt.Fprintf(w, "Metadata: %s\n", partialErr.Result.MetadataPath); writeErr != nil {
+					return writeErr
+				}
+			}
+			if partialErr.Result.Tiling != nil {
+				if partialErr.Result.Tiling.Status != "" {
+					if _, writeErr := fmt.Fprintf(w, "Tiling: %s\n", partialErr.Result.Tiling.Status); writeErr != nil {
+						return writeErr
+					}
+				}
+				for _, tile := range partialErr.Result.Tiling.Tiles {
+					if tile.Status == pkgwebcap.CaptureTileCompleted && tile.OutputPath != "" {
+						if _, writeErr := fmt.Fprintf(w, "First tile: %s\n", tile.OutputPath); writeErr != nil {
+							return writeErr
+						}
+						break
+					}
+				}
+			}
+		}
+		return nil
+	}
 	_, writeErr := fmt.Fprintf(w, "Error: %s\n", strings.TrimSpace(fmt.Sprint(err)))
 	return writeErr
 }

@@ -35,6 +35,11 @@ func writeWorkflowCapture(w io.Writer, result pkgwebcap.WorkflowCaptureResult) e
 					return err
 				}
 			}
+			if screen.Capture.Tiling != nil {
+				if _, err := fmt.Fprintf(w, " tiled=%s tiles=%d/%d", screen.Capture.Tiling.Status, screen.Capture.Tiling.CompletedCount, screen.Capture.Tiling.TileCount); err != nil {
+					return err
+				}
+			}
 			if _, err := fmt.Fprintln(w); err != nil {
 				return err
 			}

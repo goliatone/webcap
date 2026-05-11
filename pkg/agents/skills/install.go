@@ -40,13 +40,13 @@ func (e ConflictError) Error() string {
 
 type installFile struct {
 	sourcePath string
-	targetPath string
+	relPath    string
 	mode       fs.FileMode
 }
 
 type installDir struct {
-	targetPath string
-	mode       fs.FileMode
+	relPath string
+	mode    fs.FileMode
 }
 
 // Install copies a skill directory from Source into the selected agent's skill directory.
@@ -59,8 +59,8 @@ func Install(ctx context.Context, req InstallRequest) (InstallResult, error) {
 		return InstallResult{}, err
 	}
 	req.SkillName = strings.TrimSpace(req.SkillName)
-	if req.SkillName == "" {
-		return InstallResult{}, fmt.Errorf("skill name is required")
+	if err := validateSkillName(req.SkillName); err != nil {
+		return InstallResult{}, err
 	}
 	if req.Source == nil {
 		return InstallResult{}, fmt.Errorf("source filesystem is required")
@@ -105,15 +105,14 @@ func Install(ctx context.Context, req InstallRequest) (InstallResult, error) {
 			return nil
 		}
 
-		targetPath := filepath.Join(destination, filepath.FromSlash(relPath))
 		info, err := entry.Info()
 		if err != nil {
 			return fmt.Errorf("read source info %q: %w", sourcePath, err)
 		}
 		if entry.IsDir() {
 			dirs = append(dirs, installDir{
-				targetPath: targetPath,
-				mode:       dirPerm(info.Mode()),
+				relPath: filepath.FromSlash(relPath),
+				mode:    dirPerm(info.Mode()),
 			})
 			return nil
 		}
@@ -122,7 +121,7 @@ func Install(ctx context.Context, req InstallRequest) (InstallResult, error) {
 		}
 		files = append(files, installFile{
 			sourcePath: sourcePath,
-			targetPath: targetPath,
+			relPath:    filepath.FromSlash(relPath),
 			mode:       filePerm(info.Mode()),
 		})
 		return nil
@@ -130,19 +129,26 @@ func Install(ctx context.Context, req InstallRequest) (InstallResult, error) {
 	if err != nil {
 		return InstallResult{}, err
 	}
-	if err := checkConflicts(req.Source, files, req.Force); err != nil {
-		return InstallResult{}, err
-	}
 	if err := os.MkdirAll(destination, 0o750); err != nil {
 		return InstallResult{}, fmt.Errorf("create destination %q: %w", destination, err)
 	}
+	root, err := os.OpenRoot(destination)
+	if err != nil {
+		return InstallResult{}, fmt.Errorf("open destination root %q: %w", destination, err)
+	}
+	defer func() {
+		_ = root.Close()
+	}()
+	if err := checkConflicts(root, req.Source, files, destination, req.Force); err != nil {
+		return InstallResult{}, err
+	}
 	for _, dir := range dirs {
-		if err := os.MkdirAll(dir.targetPath, dir.mode); err != nil {
-			return InstallResult{}, fmt.Errorf("create destination directory %q: %w", dir.targetPath, err)
+		if err := root.MkdirAll(dir.relPath, dir.mode); err != nil {
+			return InstallResult{}, fmt.Errorf("create destination directory %q: %w", filepath.Join(destination, dir.relPath), err)
 		}
 	}
 	for _, file := range files {
-		written, err := copyFileIfNeeded(req.Source, file.sourcePath, file.targetPath, file.mode, req.Force)
+		written, err := copyFileIfNeeded(root, req.Source, file.sourcePath, file.relPath, file.mode, req.Force)
 		if err != nil {
 			return InstallResult{}, err
 		}
@@ -215,35 +221,36 @@ func resolveDestination(req InstallRequest) (string, error) {
 	return DestinationFor(req.Agent, homeDir, req.SkillName)
 }
 
-func checkConflicts(source fs.FS, files []installFile, force bool) error {
+func checkConflicts(root *os.Root, source fs.FS, files []installFile, destination string, force bool) error {
 	if force {
 		return nil
 	}
 	for _, file := range files {
-		targetInfo, err := os.Stat(file.targetPath)
+		targetPath := filepath.Join(destination, file.relPath)
+		targetInfo, err := root.Stat(file.relPath)
 		if err != nil {
 			if errors.Is(err, fs.ErrNotExist) {
 				continue
 			}
-			return fmt.Errorf("stat destination file %q: %w", file.targetPath, err)
+			return fmt.Errorf("stat destination file %q: %w", targetPath, err)
 		}
 		if !targetInfo.Mode().IsRegular() {
-			return ConflictError{Path: file.targetPath}
+			return ConflictError{Path: targetPath}
 		}
-		same, err := sameFileContent(source, file.sourcePath, file.targetPath)
+		same, err := sameFileContent(root, source, file.sourcePath, file.relPath)
 		if err != nil {
 			return err
 		}
 		if !same {
-			return ConflictError{Path: file.targetPath}
+			return ConflictError{Path: targetPath}
 		}
 	}
 	return nil
 }
 
-func copyFileIfNeeded(source fs.FS, sourcePath, targetPath string, perm fs.FileMode, force bool) (bool, error) {
+func copyFileIfNeeded(root *os.Root, source fs.FS, sourcePath, targetPath string, perm fs.FileMode, force bool) (bool, error) {
 	if !force {
-		same, err := sameRegularFileContent(source, sourcePath, targetPath)
+		same, err := sameRegularFileContent(root, source, sourcePath, targetPath)
 		if err != nil {
 			return false, err
 		}
@@ -251,14 +258,14 @@ func copyFileIfNeeded(source fs.FS, sourcePath, targetPath string, perm fs.FileM
 			return false, nil
 		}
 	}
-	if err := copyFile(source, sourcePath, targetPath, perm); err != nil {
+	if err := copyFile(root, source, sourcePath, targetPath, perm); err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
-func sameRegularFileContent(source fs.FS, sourcePath, targetPath string) (bool, error) {
-	info, err := os.Stat(targetPath)
+func sameRegularFileContent(root *os.Root, source fs.FS, sourcePath, targetPath string) (bool, error) {
+	info, err := root.Stat(targetPath)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return false, nil
@@ -268,22 +275,22 @@ func sameRegularFileContent(source fs.FS, sourcePath, targetPath string) (bool, 
 	if !info.Mode().IsRegular() {
 		return false, nil
 	}
-	return sameFileContent(source, sourcePath, targetPath)
+	return sameFileContent(root, source, sourcePath, targetPath)
 }
 
-func sameFileContent(source fs.FS, sourcePath, targetPath string) (bool, error) {
+func sameFileContent(root *os.Root, source fs.FS, sourcePath, targetPath string) (bool, error) {
 	sourceBytes, err := fs.ReadFile(source, sourcePath)
 	if err != nil {
 		return false, fmt.Errorf("read source file %q: %w", sourcePath, err)
 	}
-	targetBytes, err := readTargetFile(targetPath)
+	targetBytes, err := root.ReadFile(targetPath)
 	if err != nil {
 		return false, fmt.Errorf("read destination file %q: %w", targetPath, err)
 	}
 	return bytes.Equal(sourceBytes, targetBytes), nil
 }
 
-func copyFile(source fs.FS, sourcePath, targetPath string, perm fs.FileMode) (err error) {
+func copyFile(root *os.Root, source fs.FS, sourcePath, targetPath string, perm fs.FileMode) (err error) {
 	in, err := source.Open(sourcePath)
 	if err != nil {
 		return fmt.Errorf("open source file %q: %w", sourcePath, err)
@@ -294,10 +301,12 @@ func copyFile(source fs.FS, sourcePath, targetPath string, perm fs.FileMode) (er
 		}
 	}()
 
-	if err := os.MkdirAll(filepath.Dir(targetPath), 0o750); err != nil {
-		return fmt.Errorf("create parent directory for %q: %w", targetPath, err)
+	if parent := filepath.Dir(targetPath); parent != "." {
+		if err := root.MkdirAll(parent, 0o750); err != nil {
+			return fmt.Errorf("create parent directory for %q: %w", targetPath, err)
+		}
 	}
-	out, err := openTargetFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
+	out, err := root.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
 	if err != nil {
 		return fmt.Errorf("open destination file %q: %w", targetPath, err)
 	}
@@ -310,44 +319,6 @@ func copyFile(source fs.FS, sourcePath, targetPath string, perm fs.FileMode) (er
 		return fmt.Errorf("close destination file %q: %w", targetPath, closeErr)
 	}
 	return nil
-}
-
-func readTargetFile(targetPath string) ([]byte, error) {
-	root, name, err := openTargetRoot(targetPath)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		_ = root.Close()
-	}()
-	file, err := root.Open(name)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		_ = file.Close()
-	}()
-	return io.ReadAll(file)
-}
-
-func openTargetFile(targetPath string, flag int, perm fs.FileMode) (*os.File, error) {
-	root, name, err := openTargetRoot(targetPath)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		_ = root.Close()
-	}()
-	return root.OpenFile(name, flag, perm)
-}
-
-func openTargetRoot(targetPath string) (*os.Root, string, error) {
-	targetPath = filepath.Clean(targetPath)
-	root, err := os.OpenRoot(filepath.Dir(targetPath))
-	if err != nil {
-		return nil, "", err
-	}
-	return root, filepath.Base(targetPath), nil
 }
 
 func dirPerm(mode fs.FileMode) fs.FileMode {

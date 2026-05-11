@@ -54,12 +54,32 @@ func DestinationFor(agent Agent, homeDir, skillName string) (string, error) {
 		return "", fmt.Errorf("home directory is required")
 	}
 	skillName = strings.TrimSpace(skillName)
-	if skillName == "" {
-		return "", fmt.Errorf("skill name is required")
+	if err := validateSkillName(skillName); err != nil {
+		return "", err
 	}
 	root, err := agentSkillRoot(agent, homeDir)
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(root, skillName), nil
+}
+
+func validateSkillName(skillName string) error {
+	if skillName == "" {
+		return fmt.Errorf("skill name is required")
+	}
+	if skillName == "." || skillName == ".." {
+		return fmt.Errorf("invalid skill name %q: expected a path-safe identifier", skillName)
+	}
+	for _, r := range skillName {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r >= '0' && r <= '9':
+		case r == '-', r == '_', r == '.':
+		default:
+			return fmt.Errorf("invalid skill name %q: expected only letters, digits, dots, underscores, or hyphens", skillName)
+		}
+	}
+	return nil
 }

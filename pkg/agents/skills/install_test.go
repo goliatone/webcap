@@ -43,6 +43,25 @@ func TestDestinationForCodexAndClaude(t *testing.T) {
 	}
 }
 
+func TestDestinationForRejectsPathLikeSkillNames(t *testing.T) {
+	home := t.TempDir()
+	for _, skillName := range []string{
+		"../outside",
+		"/tmp/outside",
+		`nested\outside`,
+		"nested/outside",
+		".",
+		"..",
+		"skill name",
+	} {
+		t.Run(skillName, func(t *testing.T) {
+			if _, err := DestinationFor(AgentCodex, home, skillName); err == nil {
+				t.Fatal("expected invalid skill name error")
+			}
+		})
+	}
+}
+
 func TestInstallCopiesNestedFilesAndIsIdempotent(t *testing.T) {
 	home := t.TempDir()
 	source := fstest.MapFS{
@@ -82,6 +101,45 @@ func TestInstallCopiesNestedFilesAndIsIdempotent(t *testing.T) {
 		t.Fatalf("repeat install rewrote unchanged files: %d", second.FilesWritten)
 	}
 	assertFileContent(t, filepath.Join(second.Destination, "SKILL.md"), "---\nname: webcap-agent\n---\n")
+}
+
+func TestInstallRejectsPathLikeSkillName(t *testing.T) {
+	_, err := Install(context.Background(), InstallRequest{
+		Agent:     AgentCodex,
+		SkillName: "../outside",
+		Source:    validSource(),
+		HomeDir:   t.TempDir(),
+	})
+	if err == nil || !strings.Contains(err.Error(), "invalid skill name") {
+		t.Fatalf("expected invalid skill name error, got %v", err)
+	}
+}
+
+func TestInstallDoesNotFollowDestinationSymlinkOutsideRoot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink setup requires elevated permissions on some Windows environments")
+	}
+	root := t.TempDir()
+	outside := t.TempDir()
+	destination := filepath.Join(root, "webcap-agent")
+	if err := os.MkdirAll(destination, 0o755); err != nil {
+		t.Fatalf("create destination: %v", err)
+	}
+	if err := os.Symlink(outside, filepath.Join(destination, "references")); err != nil {
+		t.Fatalf("create destination symlink: %v", err)
+	}
+	_, err := Install(context.Background(), InstallRequest{
+		Agent:       AgentCodex,
+		SkillName:   "webcap-agent",
+		Source:      validNestedSource(),
+		Destination: destination,
+	})
+	if err == nil {
+		t.Fatal("expected symlink escape error")
+	}
+	if _, statErr := os.Stat(filepath.Join(outside, "cli.md")); !os.IsNotExist(statErr) {
+		t.Fatalf("expected outside target to remain untouched, stat err=%v", statErr)
+	}
 }
 
 func TestInstallRejectsConflictingExistingFilesByDefault(t *testing.T) {
@@ -224,6 +282,13 @@ func TestInstallHonorsCanceledContext(t *testing.T) {
 func validSource() fstest.MapFS {
 	return fstest.MapFS{
 		"SKILL.md": {Data: []byte("# Skill\n")},
+	}
+}
+
+func validNestedSource() fstest.MapFS {
+	return fstest.MapFS{
+		"SKILL.md":          {Data: []byte("# Skill\n")},
+		"references/cli.md": {Data: []byte("# CLI\n")},
 	}
 }
 

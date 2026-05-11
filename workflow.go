@@ -468,6 +468,10 @@ func applyWorkflowCaptureDefaults(request *CaptureRequest, defaults WorkflowDefa
 	if request.WaitFor == "" {
 		request.WaitFor = defaults.WaitFor
 	}
+	if request.OversizePolicy == "" {
+		request.OversizePolicy = defaults.OversizePolicy
+	}
+	request.Tile = mergeTileOptions(defaults.Tile, request.Tile)
 	if request.Mode() == CaptureModeViewport && defaults.FullPage != nil {
 		request.FullPage = *defaults.FullPage
 	}

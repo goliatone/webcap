@@ -923,9 +923,29 @@ var workflowReportTemplate = template.Must(template.New("workflow-report").Funcs
                 </div>
               </div>
 
-              <div class="screen-detail-sidebar">
-                {{ if $entry.SemanticDiff }}
-                <div class="evidence-panel">
+	              <div class="screen-detail-sidebar">
+	                {{ if or $entry.TileMetadataRelative $entry.TileArtifactLinks }}
+	                <div class="evidence-panel">
+	                  <div class="evidence-panel-header">
+	                    <span class="evidence-panel-title">Tiled Capture</span>
+	                  </div>
+	                  <div class="evidence-panel-body">
+	                    {{ if $entry.TileMetadataRelative }}
+	                    <div class="evidence-item">
+	                      <div class="evidence-content"><a href="{{ $entry.TileMetadataRelative }}">Tile metadata</a></div>
+	                    </div>
+	                    {{ end }}
+	                    {{ range $entry.TileArtifactLinks }}
+	                    <div class="evidence-item">
+	                      <div class="evidence-content"><a href="{{ .RelativePath }}">{{ .Label }}</a></div>
+	                    </div>
+	                    {{ end }}
+	                  </div>
+	                </div>
+	                {{ end }}
+
+	                {{ if $entry.SemanticDiff }}
+	                <div class="evidence-panel">
                   <div class="evidence-panel-header">
                     <span class="evidence-panel-title">Semantic Diff</span>
                   </div>
@@ -1571,6 +1591,13 @@ func (s *Service) buildWorkflowReportEntry(ctx context.Context, scenario Workflo
 		PrimaryStories:    workflowStoriesForIDs(scenario.Stories, screen.PrimaryStories),
 		SupportingStories: workflowStoriesForIDs(scenario.Stories, screen.SupportingStories),
 	}
+	if payload, readErr := os.ReadFile(currentMetadata); readErr == nil {
+		var capture CaptureResult
+		if unmarshalErr := json.Unmarshal(payload, &capture); unmarshalErr == nil {
+			entry.CurrentCapture = &capture
+			entry.Warnings = append(entry.Warnings, capture.Warnings...)
+		}
+	}
 	if _, statErr := os.Stat(currentPath); statErr != nil {
 		entry.MissingCurrent = true
 		entry.Warnings = append(entry.Warnings, CaptureWarning{Code: string(CodeValidation), Message: "current capture image is missing"})
@@ -1579,14 +1606,14 @@ func (s *Service) buildWorkflowReportEntry(ctx context.Context, scenario Workflo
 		entry.MissingReference = true
 		entry.Warnings = append(entry.Warnings, CaptureWarning{Code: string(CodeValidation), Message: "reference image is missing"})
 	}
-	if !entry.MissingCurrent {
-		if payload, readErr := os.ReadFile(currentMetadata); readErr == nil {
-			var capture CaptureResult
-			if unmarshalErr := json.Unmarshal(payload, &capture); unmarshalErr == nil {
-				entry.CurrentCapture = &capture
-				entry.Warnings = append(entry.Warnings, capture.Warnings...)
-			}
-		}
+	if entry.CurrentCapture != nil && entry.CurrentCapture.Tiling != nil && entry.CurrentCapture.Tiling.StitchedPath == "" {
+		entry.MissingCurrent = false
+		entry.Warnings = append(entry.Warnings, CaptureWarning{
+			Code:    "tiled_capture_unstitched",
+			Message: "unstitched tiled capture is an artifact set; single-image comparison was skipped",
+		})
+		entry.Status = workflowReviewStatusForEntry(entry)
+		return entry, nil
 	}
 	if entry.MissingCurrent || entry.MissingReference {
 		entry.Status = workflowReviewStatusForEntry(entry)
@@ -1789,6 +1816,13 @@ type workflowReportTemplateEntry struct {
 	CurrentImageRelative   string
 	ReferenceImageRelative string
 	DiffImageRelative      string
+	TileMetadataRelative   string
+	TileArtifactLinks      []workflowReportArtifactLink
+}
+
+type workflowReportArtifactLink struct {
+	Label        string
+	RelativePath string
 }
 
 func stageWorkflowReportAssets(scenario WorkflowScenario, result WorkflowReportResult) (workflowReportTemplateView, error) {
@@ -1829,14 +1863,50 @@ func stageWorkflowReportAssets(scenario WorkflowScenario, result WorkflowReportR
 		if err != nil {
 			return workflowReportTemplateView{}, err
 		}
+		tileMetadataRelative, tileArtifactLinks, err := stageWorkflowTileArtifacts(reportDir, entry)
+		if err != nil {
+			return workflowReportTemplateView{}, err
+		}
 		view.Entries = append(view.Entries, workflowReportTemplateEntry{
 			WorkflowReportEntry:    entry,
 			CurrentImageRelative:   currentRelative,
 			ReferenceImageRelative: referenceRelative,
 			DiffImageRelative:      diffRelative,
+			TileMetadataRelative:   tileMetadataRelative,
+			TileArtifactLinks:      tileArtifactLinks,
 		})
 	}
 	return view, nil
+}
+
+func stageWorkflowTileArtifacts(reportDir string, entry WorkflowReportEntry) (string, []workflowReportArtifactLink, error) {
+	if entry.CurrentCapture == nil || entry.CurrentCapture.Tiling == nil || entry.CurrentCapture.Tiling.StitchedPath != "" {
+		return "", nil, nil
+	}
+	kind := "tiles-" + firstNonEmpty(entry.ScreenID, "screen")
+	metadataPath := firstNonEmpty(entry.CurrentCapture.Tiling.MetadataPath, entry.CurrentCapture.MetadataPath, entry.CurrentMetadata)
+	metadataRelative, err := stageWorkflowReportAsset(reportDir, kind, metadataPath)
+	if err != nil {
+		return "", nil, err
+	}
+	links := make([]workflowReportArtifactLink, 0, len(entry.CurrentCapture.Tiling.Tiles))
+	for _, tile := range entry.CurrentCapture.Tiling.Tiles {
+		if tile.OutputPath == "" {
+			continue
+		}
+		relative, err := stageWorkflowReportAsset(reportDir, kind, tile.OutputPath)
+		if err != nil {
+			return "", nil, err
+		}
+		if relative == "" {
+			continue
+		}
+		links = append(links, workflowReportArtifactLink{
+			Label:        fmt.Sprintf("Tile %04d", tile.Index),
+			RelativePath: relative,
+		})
+	}
+	return metadataRelative, links, nil
 }
 
 func workflowReviewStatusForEntry(entry WorkflowReportEntry) WorkflowReviewStatus {

@@ -28,13 +28,14 @@ webcap report scenario ./workflow.yaml
 webcap mcp serve
 webcap skill install --agent codex
 webcap skill install --agent claude
+webcap skill install --agent codex --force
 ```
 
 The standalone CLI does not include application-specific scenario aliases or paths. Provide scenario files explicitly.
 Use `--openai-base-url` or `--anthropic-base-url` with `semantic-diff`, `workflow capture-scenario`, `report scenario`, or `mcp serve` when routing built-in providers through a local fake server, proxy, or compatible gateway.
 Use `--codex-bin`, `--codex-profile`, `--codex-oss`, `--codex-local-provider`, and repeated `--codex-extra-arg` flags to configure the local Codex CLI process. CLI providers reuse local tool configuration and may still use subscriptions, API accounts, or local model resources.
 
-`webcap skill install` installs the bundled `webcap-agent` guidance for AI coding agents. The skill tells agents to prefer webcap MCP tools when available, use the CLI as a fallback or reproducible command surface, and keep capture, pixel diff, semantic diff, and workflow report artifacts organized.
+`webcap skill install` installs the bundled `webcap-agent` guidance for AI coding agents. The skill tells agents to prefer webcap MCP tools when available, use the CLI as a fallback or reproducible command surface, and keep capture, pixel diff, semantic diff, and workflow report artifacts organized. Existing modified skill files are not overwritten unless `--force` is provided.
 
 ## Go Package
 
@@ -76,16 +77,18 @@ result, err := service.SemanticDiff(ctx, webcap.SemanticDiffRequest{
 })
 ```
 
-`NewService` and `NewServiceWithOptions` include the shipped `openai`, `anthropic`, and `codex-cli` providers by default. To use a custom, wrapped, or composite provider strategy, register it by normalized provider name; caller-supplied providers override the shipped adapter with the same name:
+`NewService` and `NewServiceWithOptions` include the shipped `openai`, `anthropic`, and `codex-cli` providers by default. Register standalone LLM providers through `pkg/llms.Options.Providers`; `SemanticDiffOptions.Providers` remains available for direct `webcap.SemanticDiffProvider` implementations and overrides any adapted LLM provider with the same normalized name:
 
 ```go
 service := webcap.NewServiceWithOptions(nil, webcap.Options{
     SemanticDiff: webcap.SemanticDiffOptions{
-        Providers: map[string]webcap.SemanticDiffProvider{
-            "openai": myProvider,
+        LLMs: llms.Options{
+            Providers: map[string]llms.Provider{
+                "local-agent": myLLMProvider,
+            },
         },
         DefaultModels: map[string]string{
-            "openai": "gpt-5.1",
+            "local-agent": "gpt-5.1",
         },
     },
 })

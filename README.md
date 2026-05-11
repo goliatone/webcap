@@ -20,15 +20,16 @@ go install github.com/goliatone/webcap/cmd/webcap@latest
 For local development from this checkout:
 
 ```bash
-go run ./cmd/webcap shot --full-page --output shots/home.png http://localhost:3000
+go run ./cmd/webcap shot --output shots/home.png http://localhost:3000
 ```
 
 ## CLI
 
 ```bash
 webcap help
-webcap shot --full-page --output shots/home.png http://localhost:3000
-webcap shot --json --full-page --output shots/home.png http://localhost:3000
+webcap shot --output shots/home.png http://localhost:3000
+webcap shot --visible --output shots/home-visible.png http://localhost:3000
+webcap shot --json --output shots/home.png http://localhost:3000
 webcap multi --output-dir ./shots ./shots.yaml
 webcap diff --output ./diff.png ./baseline.png ./current.png
 OPENAI_API_KEY=... webcap semantic-diff --provider openai --model gpt-5.1 --focus "primary CTA,nav labels" --metadata ./semantic.json ./current.png ./baseline.png
@@ -42,6 +43,7 @@ webcap skill install --agent codex --force
 ```
 
 Result commands render concise human summaries by default. Use `--json` or `--format json` for the machine-readable result structs used by automation and future API responses. Use `--format human` to force human output and `--no-color` for deterministic output in CI, redirected output, and tests.
+`webcap shot <url>` captures the full page by default. Add `--visible` when you only want the current viewport.
 
 The standalone CLI does not include application-specific scenario aliases or paths. Provide scenario files explicitly.
 Use `--openai-base-url` or `--anthropic-base-url` with `semantic-diff`, `workflow capture-scenario`, `report scenario`, or `mcp serve` when routing built-in providers through a local fake server, proxy, or compatible gateway.

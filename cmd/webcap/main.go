@@ -45,13 +45,40 @@ func runCLI(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 }
 
 type app struct {
-	stdin  io.Reader
-	stdout io.Writer
-	stderr io.Writer
+	stdin              io.Reader
+	stdout             io.Writer
+	stderr             io.Writer
+	newCaptureService  func(browserOptions, semanticProviderOptions) (cliService, error)
+	newScenarioService func(browserOptions, semanticProviderOptions, pkgwebcap.WorkflowScenario) (cliService, error)
+	newService         func(semanticProviderOptions) cliService
+	loadManifest       func(string) (pkgwebcap.Manifest, error)
+	loadScenario       func(string) (pkgwebcap.WorkflowScenario, error)
+}
+
+type cliService interface {
+	pkgwebcap.CaptureService
+	pkgwebcap.DiffService
+	pkgwebcap.SemanticDiffService
+	pkgwebcap.WorkflowService
 }
 
 func newApp(stdin io.Reader, stdout, stderr io.Writer) app {
-	return app{stdin: stdin, stdout: stdout, stderr: stderr}
+	return app{
+		stdin:  stdin,
+		stdout: stdout,
+		stderr: stderr,
+		newCaptureService: func(browser browserOptions, provider semanticProviderOptions) (cliService, error) {
+			return newCaptureService(browser, provider)
+		},
+		newScenarioService: func(browser browserOptions, provider semanticProviderOptions, scenario pkgwebcap.WorkflowScenario) (cliService, error) {
+			return newScenarioCaptureService(browser, provider, scenario)
+		},
+		newService: func(provider semanticProviderOptions) cliService {
+			return pkgwebcap.NewServiceWithOptions(nil, semanticServiceOptions(provider))
+		},
+		loadManifest: pkgwebcap.LoadManifest,
+		loadScenario: pkgwebcap.LoadWorkflowScenario,
+	}
 }
 
 func run(ctx context.Context, invocation cliInvocation) error {
@@ -65,15 +92,15 @@ func (a app) run(ctx context.Context, invocation cliInvocation) error {
 	case "version":
 		return runVersion(ctx, invocation, a.stdout)
 	case "mcp":
-		return runMCP(ctx, invocation, a.stdin, a.stdout)
+		return a.runMCP(ctx, invocation, a.stdin, a.stdout)
 	}
 	handlers := map[string]func(context.Context, cliInvocation) (any, error){
-		"shot":          runShot,
-		"multi":         runMulti,
-		"diff":          runDiff,
-		"semantic-diff": runSemanticDiff,
-		"workflow":      runWorkflow,
-		"report":        runReport,
+		"shot":          a.runShot,
+		"multi":         a.runMulti,
+		"diff":          a.runDiff,
+		"semantic-diff": a.runSemanticDiff,
+		"workflow":      a.runWorkflow,
+		"report":        a.runReport,
 		"skill":         runSkill,
 	}
 	handler, ok := handlers[invocation.Command]
@@ -107,8 +134,8 @@ func runSkill(ctx context.Context, invocation cliInvocation) (any, error) {
 	return result, nil
 }
 
-func runSemanticDiff(ctx context.Context, invocation cliInvocation) (any, error) {
-	service := pkgwebcap.NewServiceWithOptions(nil, semanticServiceOptions(invocation.Provider))
+func (a app) runSemanticDiff(ctx context.Context, invocation cliInvocation) (any, error) {
+	service := a.newService(invocation.Provider)
 	handler := commandwebcap.NewSemanticDiffHandler(service)
 	result, err := handler.Handle(ctx, commandwebcap.SemanticDiffMessage{
 		Request: invocation.Semantic.Request,
@@ -128,8 +155,8 @@ func runVersion(_ context.Context, _ cliInvocation, stdout io.Writer) error {
 	return version.Print(stdout)
 }
 
-func runShot(ctx context.Context, invocation cliInvocation) (any, error) {
-	service, err := newCaptureService(invocation.Browser, invocation.Provider)
+func (a app) runShot(ctx context.Context, invocation cliInvocation) (any, error) {
+	service, err := a.newCaptureService(invocation.Browser, invocation.Provider)
 	if err != nil {
 		return nil, err
 	}
@@ -143,12 +170,12 @@ func runShot(ctx context.Context, invocation cliInvocation) (any, error) {
 	return result, nil
 }
 
-func runMulti(ctx context.Context, invocation cliInvocation) (any, error) {
-	manifest, err := pkgwebcap.LoadManifest(invocation.Multi.ManifestPath)
+func (a app) runMulti(ctx context.Context, invocation cliInvocation) (any, error) {
+	manifest, err := a.loadManifest(invocation.Multi.ManifestPath)
 	if err != nil {
 		return nil, err
 	}
-	service, err := newCaptureService(invocation.Browser, invocation.Provider)
+	service, err := a.newCaptureService(invocation.Browser, invocation.Provider)
 	if err != nil {
 		return nil, err
 	}
@@ -163,8 +190,8 @@ func runMulti(ctx context.Context, invocation cliInvocation) (any, error) {
 	return result, nil
 }
 
-func runDiff(ctx context.Context, invocation cliInvocation) (any, error) {
-	service := pkgwebcap.NewService(nil)
+func (a app) runDiff(ctx context.Context, invocation cliInvocation) (any, error) {
+	service := a.newService(invocation.Provider)
 	handler := commandwebcap.NewDiffHandler(service)
 	result, err := handler.Handle(ctx, commandwebcap.DiffMessage{
 		Request: invocation.Diff.Request,
@@ -175,11 +202,11 @@ func runDiff(ctx context.Context, invocation cliInvocation) (any, error) {
 	return result, nil
 }
 
-func runMCP(ctx context.Context, invocation cliInvocation, stdin io.Reader, stdout io.Writer) error {
+func (a app) runMCP(ctx context.Context, invocation cliInvocation, stdin io.Reader, stdout io.Writer) error {
 	if invocation.MCP.Action != "serve" {
 		return fmt.Errorf("unsupported mcp action %q", invocation.MCP.Action)
 	}
-	service, err := newCaptureService(invocation.Browser, invocation.Provider)
+	service, err := a.newCaptureService(invocation.Browser, invocation.Provider)
 	if err != nil {
 		return err
 	}
@@ -197,12 +224,12 @@ func runMCP(ctx context.Context, invocation cliInvocation, stdin io.Reader, stdo
 	return server.Serve(ctx, stdin, stdout)
 }
 
-func runWorkflow(ctx context.Context, invocation cliInvocation) (any, error) {
-	scenario, err := pkgwebcap.LoadWorkflowScenario(invocation.Workflow.ScenarioPath)
+func (a app) runWorkflow(ctx context.Context, invocation cliInvocation) (any, error) {
+	scenario, err := a.loadScenario(invocation.Workflow.ScenarioPath)
 	if err != nil {
 		return nil, err
 	}
-	service, err := newScenarioCaptureService(invocation.Browser, invocation.Provider, scenario)
+	service, err := a.newScenarioService(invocation.Browser, invocation.Provider, scenario)
 	if err != nil {
 		return nil, err
 	}
@@ -219,7 +246,7 @@ func runWorkflow(ctx context.Context, invocation cliInvocation) (any, error) {
 	return runWorkflowReport(ctx, service, scenario, captureResult)
 }
 
-func runWorkflowReport(ctx context.Context, service *pkgwebcap.Service, scenario pkgwebcap.WorkflowScenario, captureResult pkgwebcap.WorkflowCaptureResult) (any, error) {
+func runWorkflowReport(ctx context.Context, service pkgwebcap.WorkflowService, scenario pkgwebcap.WorkflowScenario, captureResult pkgwebcap.WorkflowCaptureResult) (any, error) {
 	reportHandler := commandwebcap.NewWorkflowReportHandler(service)
 	reportResult, err := reportHandler.Handle(ctx, commandwebcap.WorkflowReportMessage{
 		Request: pkgwebcap.WorkflowReportRequest{Scenario: scenario},
@@ -233,12 +260,12 @@ func runWorkflowReport(ctx context.Context, service *pkgwebcap.Service, scenario
 	}, nil
 }
 
-func runReport(ctx context.Context, invocation cliInvocation) (any, error) {
-	scenario, err := pkgwebcap.LoadWorkflowScenario(invocation.Report.ScenarioPath)
+func (a app) runReport(ctx context.Context, invocation cliInvocation) (any, error) {
+	scenario, err := a.loadScenario(invocation.Report.ScenarioPath)
 	if err != nil {
 		return nil, err
 	}
-	service := pkgwebcap.NewServiceWithOptions(nil, semanticServiceOptions(invocation.Provider))
+	service := a.newService(invocation.Provider)
 	handler := commandwebcap.NewWorkflowReportHandler(service)
 	result, err := handler.Handle(ctx, commandwebcap.WorkflowReportMessage{
 		Request: pkgwebcap.WorkflowReportRequest{Scenario: scenario},

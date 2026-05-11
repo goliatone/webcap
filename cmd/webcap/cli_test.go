@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"testing"
 
 	pkgwebcap "github.com/goliatone/webcap"
@@ -32,6 +33,70 @@ func TestParseShotCLI(t *testing.T) {
 	}
 	if invocation.Shot.Request.Readiness != pkgwebcap.ReadinessComplete {
 		t.Fatalf("unexpected readiness: %s", invocation.Shot.Request.Readiness)
+	}
+	if invocation.Output.Format != "human" {
+		t.Fatalf("unexpected default output format: %s", invocation.Output.Format)
+	}
+}
+
+func TestParseOutputOptions(t *testing.T) {
+	tests := []struct {
+		name   string
+		args   []string
+		format string
+	}{
+		{name: "json shorthand", args: []string{"shot", "--json", "http://localhost:3000"}, format: "json"},
+		{name: "format json", args: []string{"shot", "--format", "json", "http://localhost:3000"}, format: "json"},
+		{name: "format human", args: []string{"shot", "--format", "human", "http://localhost:3000"}, format: "human"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			invocation, err := parseCLI(tt.args)
+			if err != nil {
+				t.Fatalf("parseCLI returned error: %v", err)
+			}
+			if invocation.Output.Format != tt.format {
+				t.Fatalf("unexpected format: got %s want %s", invocation.Output.Format, tt.format)
+			}
+		})
+	}
+}
+
+func TestParseOutputOptionsNoColor(t *testing.T) {
+	invocation, err := parseCLI([]string{"shot", "--no-color", "http://localhost:3000"})
+	if err != nil {
+		t.Fatalf("parseCLI returned error: %v", err)
+	}
+	if !invocation.Output.NoColor {
+		t.Fatal("expected no-color output option")
+	}
+}
+
+func TestParseOutputOptionsRejectsUnsupportedFormat(t *testing.T) {
+	_, err := parseCLI([]string{"shot", "--format", "xml", "http://localhost:3000"})
+	if err == nil {
+		t.Fatal("expected unsupported format error")
+	}
+	var parseErr cliParseError
+	if !errors.As(err, &parseErr) {
+		t.Fatalf("expected cliParseError, got %T", err)
+	}
+	if parseErr.Output.Format != "xml" {
+		t.Fatalf("expected parse error to preserve output context, got %#v", parseErr.Output)
+	}
+}
+
+func TestParseJSONModePositionalErrorKeepsOutputContext(t *testing.T) {
+	_, err := parseCLI([]string{"shot", "--json"})
+	if err == nil {
+		t.Fatal("expected missing positional argument")
+	}
+	var parseErr cliParseError
+	if !errors.As(err, &parseErr) {
+		t.Fatalf("expected cliParseError, got %T", err)
+	}
+	if parseErr.Output.Format != "json" {
+		t.Fatalf("expected json output context, got %#v", parseErr.Output)
 	}
 }
 
@@ -152,6 +217,15 @@ func TestParseHelpCLIRejectsArguments(t *testing.T) {
 	}
 }
 
+func TestParseHelpAndVersionRemainHumanOnly(t *testing.T) {
+	if _, err := parseCLI([]string{"help", "--json"}); err == nil {
+		t.Fatal("expected help --json to be rejected")
+	}
+	if _, err := parseCLI([]string{"version", "--format", "json"}); err == nil {
+		t.Fatal("expected version --format json to be rejected")
+	}
+}
+
 func TestParseShotCLIWithDeterministicFlags(t *testing.T) {
 	invocation, err := parseCLI([]string{
 		"shot",
@@ -228,6 +302,12 @@ func TestParseMCPServeCLI(t *testing.T) {
 	}
 	if invocation.Provider.OpenAIBaseURL != "https://openai.test/v1/responses" {
 		t.Fatalf("unexpected provider options: %#v", invocation.Provider)
+	}
+}
+
+func TestParseMCPServeCLIRejectsJSONFlag(t *testing.T) {
+	if _, err := parseCLI([]string{"mcp", "serve", "--json"}); err == nil {
+		t.Fatal("expected mcp serve --json to be rejected")
 	}
 }
 

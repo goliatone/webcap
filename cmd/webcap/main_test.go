@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"image"
 	"image/color"
 	"image/png"
@@ -36,7 +39,7 @@ func TestRunHelpCLI(t *testing.T) {
 		"webcap version",
 		"webcap shot [flags] <url>",
 		"webcap mcp serve [flags]",
-		"webcap skill install --agent <codex|claude>",
+		"webcap skill install [flags] --agent <codex|claude>",
 	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("expected help output to contain %q, got:\n%s", expected, output)
@@ -118,8 +121,9 @@ func TestRunSkillInstallUsesEmbeddedAssets(t *testing.T) {
 			}
 			destination := tt.destination(home)
 			for _, expected := range []string{
-				`"agent": "` + tt.agent + `"`,
-				`"skill_name": "webcap-agent"`,
+				"Skill install complete",
+				"Agent: " + tt.agent,
+				"Skill: webcap-agent",
 				destination,
 			} {
 				if !strings.Contains(output, expected) {
@@ -185,7 +189,7 @@ func TestRunSkillInstallRejectsConflictUnlessForced(t *testing.T) {
 	if runErr != nil {
 		t.Fatalf("forced run returned error: %v", runErr)
 	}
-	if !strings.Contains(output, `"files_written":`) {
+	if !strings.Contains(output, "Files written:") {
 		t.Fatalf("expected forced install output to include files_written, got:\n%s", output)
 	}
 	got, err = os.ReadFile(skillPath)
@@ -194,6 +198,98 @@ func TestRunSkillInstallRejectsConflictUnlessForced(t *testing.T) {
 	}
 	if string(got) == "# User edit\n" {
 		t.Fatal("forced install did not replace conflicting file")
+	}
+}
+
+func TestRunSkillInstallJSONModePreservesResultShape(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	invocation, err := parseCLI([]string{"skill", "install", "--json", "--agent", "codex"})
+	if err != nil {
+		t.Fatalf("parseCLI returned error: %v", err)
+	}
+	var runErr error
+	output := captureStdout(t, func() {
+		runErr = run(context.Background(), invocation)
+	})
+	if runErr != nil {
+		t.Fatalf("run returned error: %v", runErr)
+	}
+	var decoded struct {
+		Agent        string `json:"agent"`
+		SkillName    string `json:"skill_name"`
+		Destination  string `json:"destination"`
+		FilesWritten int    `json:"files_written"`
+	}
+	if err := json.Unmarshal([]byte(output), &decoded); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, output)
+	}
+	if decoded.Agent != "codex" || decoded.SkillName != "webcap-agent" || decoded.FilesWritten == 0 {
+		t.Fatalf("unexpected install result: %#v", decoded)
+	}
+}
+
+func TestRunCLIJSONParseErrorWritesEnvelopeToStderr(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runCLI(context.Background(), []string{"shot", "--json"}, strings.NewReader(""), &stdout, &stderr)
+	if code == 0 {
+		t.Fatal("expected non-zero exit code")
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("expected empty stdout, got:\n%s", stdout.String())
+	}
+	var envelope struct {
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(stderr.Bytes(), &envelope); err != nil {
+		t.Fatalf("stderr is not valid JSON: %v\n%s", err, stderr.String())
+	}
+	if !strings.Contains(envelope.Message, "shot requires exactly one positional url argument") {
+		t.Fatalf("unexpected envelope: %#v", envelope)
+	}
+}
+
+func TestRunCLIExplicitJSONInvalidFormatWritesEnvelopeToStderr(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runCLI(context.Background(), []string{"shot", "--json", "--format", "xml", "https://example.test"}, strings.NewReader(""), &stdout, &stderr)
+	if code == 0 {
+		t.Fatal("expected non-zero exit code")
+	}
+	var envelope struct {
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(stderr.Bytes(), &envelope); err != nil {
+		t.Fatalf("stderr is not valid JSON: %v\n%s", err, stderr.String())
+	}
+	if !strings.Contains(envelope.Message, `unsupported output format "xml"`) {
+		t.Fatalf("unexpected envelope: %#v", envelope)
+	}
+}
+
+func TestRunCLIHumanSetupErrorWritesStderr(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runCLI(context.Background(), []string{"shot", "--engine", "bogus", "https://example.test"}, strings.NewReader(""), &stdout, &stderr)
+	if code == 0 {
+		t.Fatal("expected non-zero exit code")
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("expected empty stdout, got:\n%s", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "Error: unsupported engine") {
+		t.Fatalf("unexpected stderr:\n%s", stderr.String())
+	}
+}
+
+func TestRunPresenterWriteErrorIsReturned(t *testing.T) {
+	invocation, err := parseCLI([]string{"skill", "install", "--agent", "codex"})
+	if err != nil {
+		t.Fatalf("parseCLI returned error: %v", err)
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	runErr := newApp(strings.NewReader(""), errWriter{}, io.Discard).run(context.Background(), invocation)
+	if !errors.Is(runErr, errWriteFailed) {
+		t.Fatalf("expected writer error, got %v", runErr)
 	}
 }
 
@@ -302,6 +398,14 @@ func captureStdout(t *testing.T, fn func()) string {
 		t.Fatalf("read stdout: %v", err)
 	}
 	return string(output)
+}
+
+var errWriteFailed = errors.New("write failed")
+
+type errWriter struct{}
+
+func (errWriter) Write(_ []byte) (int, error) {
+	return 0, errWriteFailed
 }
 
 func writeMainTestPNG(t *testing.T, path string, c color.NRGBA) {

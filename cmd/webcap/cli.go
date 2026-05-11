@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	pkgwebcap "github.com/goliatone/webcap"
+	"github.com/goliatone/webcap/pkg/agents/skills"
 )
 
 type cliInvocation struct {
@@ -15,10 +16,13 @@ type cliInvocation struct {
 	Shot     shotOptions
 	Multi    multiOptions
 	Diff     diffOptions
+	Semantic semanticDiffOptions
 	Workflow workflowOptions
 	Report   reportOptions
 	MCP      mcpOptions
+	Skill    skillOptions
 	Browser  browserOptions
+	Provider semanticProviderOptions
 }
 
 type browserOptions struct {
@@ -49,6 +53,21 @@ type diffOptions struct {
 	Request pkgwebcap.DiffRequest
 }
 
+type semanticDiffOptions struct {
+	Request  pkgwebcap.SemanticDiffRequest
+	FocusCSV string
+}
+
+type semanticProviderOptions struct {
+	OpenAIBaseURL      string
+	AnthropicBaseURL   string
+	CodexBin           string
+	CodexProfile       string
+	CodexOSS           bool
+	CodexLocalProvider string
+	CodexExtraArgs     []string
+}
+
 type workflowOptions struct {
 	Action       string
 	ScenarioPath string
@@ -64,9 +83,15 @@ type mcpOptions struct {
 	Action string
 }
 
+type skillOptions struct {
+	Action string
+	Agent  skills.Agent
+	Force  bool
+}
+
 func parseCLI(args []string) (cliInvocation, error) {
 	if len(args) == 0 {
-		return cliInvocation{}, errors.New("expected subcommand: help, version, shot, multi, diff, workflow, report, or mcp")
+		return cliInvocation{}, errors.New("expected subcommand: help, version, shot, multi, diff, semantic-diff, workflow, report, mcp, or skill")
 	}
 
 	switch strings.TrimSpace(args[0]) {
@@ -80,12 +105,16 @@ func parseCLI(args []string) (cliInvocation, error) {
 		return parseMultiCLI(args[1:])
 	case "diff":
 		return parseDiffCLI(args[1:])
+	case "semantic-diff":
+		return parseSemanticDiffCLI(args[1:])
 	case "workflow":
 		return parseWorkflowCLI(args[1:])
 	case "report":
 		return parseReportCLI(args[1:])
 	case "mcp":
 		return parseMCPCLI(args[1:])
+	case "skill":
+		return parseSkillCLI(args[1:])
 	default:
 		return cliInvocation{}, fmt.Errorf("unsupported subcommand %q", args[0])
 	}
@@ -220,6 +249,53 @@ func parseDiffCLI(args []string) (cliInvocation, error) {
 	return invocation, nil
 }
 
+func parseSemanticDiffCLI(args []string) (cliInvocation, error) {
+	var (
+		stderr        bytes.Buffer
+		mode          string
+		pixelDiffPath string
+		threshold     float64
+	)
+
+	invocation := cliInvocation{Command: "semantic-diff"}
+	fs := flag.NewFlagSet("webcap semantic-diff", flag.ContinueOnError)
+	fs.SetOutput(&stderr)
+	registerSemanticProviderFlags(fs, &invocation.Provider)
+	fs.StringVar(&invocation.Semantic.Request.Provider, "provider", "", "Semantic diff provider: openai, anthropic, or codex-cli.")
+	fs.StringVar(&invocation.Semantic.Request.Model, "model", "", "Provider model name.")
+	fs.StringVar(&mode, "mode", string(pkgwebcap.SemanticDiffModeGeneral), "Semantic diff mode: general, focused, copy, layout, accessibility, or custom.")
+	fs.StringVar(&invocation.Semantic.Request.Prompt, "prompt", "", "Additional prompt instructions.")
+	fs.StringVar(&invocation.Semantic.Request.PromptPath, "prompt-file", "", "Path to a prompt instruction file.")
+	fs.StringVar(&invocation.Semantic.FocusCSV, "focus", "", "Comma-separated focus areas.")
+	fs.StringVar(&invocation.Semantic.Request.MetadataPath, "metadata", "", "Semantic diff metadata JSON path.")
+	fs.StringVar(&invocation.Semantic.Request.RawResponsePath, "raw-response", "", "Optional raw provider response path.")
+	fs.BoolVar(&invocation.Semantic.Request.PersistRawResponse, "persist-raw-response", false, "Persist the raw provider response for debugging.")
+	fs.StringVar(&invocation.Semantic.Request.Timeout, "timeout", "", "Provider request timeout such as 60s.")
+	fs.IntVar(&invocation.Semantic.Request.MaxOutputTokens, "max-output-tokens", 0, "Provider max output token limit.")
+	fs.StringVar(&pixelDiffPath, "pixel-diff-image", "", "Existing pixel diff image to include as optional context.")
+	fs.IntVar(&invocation.Semantic.Request.PixelContext.ChangedPixels, "changed-pixels", 0, "Existing pixel diff changed pixel count.")
+	fs.IntVar(&invocation.Semantic.Request.PixelContext.TotalPixels, "total-pixels", 0, "Existing pixel diff total pixel count.")
+	fs.Float64Var(&invocation.Semantic.Request.PixelContext.ChangedPercent, "changed-percent", 0, "Existing pixel diff changed percent.")
+	fs.Float64Var(&threshold, "threshold", 0, "Existing pixel diff threshold.")
+	if err := fs.Parse(args); err != nil {
+		message := strings.TrimSpace(stderr.String())
+		if message == "" {
+			message = err.Error()
+		}
+		return cliInvocation{}, errors.New(message)
+	}
+	if len(fs.Args()) != 2 {
+		return cliInvocation{}, errors.New("semantic-diff requires current and reference image paths")
+	}
+	invocation.Semantic.Request.CurrentPath = strings.TrimSpace(fs.Args()[0])
+	invocation.Semantic.Request.ReferencePath = strings.TrimSpace(fs.Args()[1])
+	invocation.Semantic.Request.Mode = pkgwebcap.SemanticDiffMode(mode)
+	invocation.Semantic.Request.Focus = splitCSV(invocation.Semantic.FocusCSV)
+	invocation.Semantic.Request.PixelContext.PixelDiffImagePath = strings.TrimSpace(pixelDiffPath)
+	invocation.Semantic.Request.PixelContext.Threshold = threshold
+	return invocation, nil
+}
+
 func parseMCPCLI(args []string) (cliInvocation, error) {
 	if len(args) == 0 {
 		return cliInvocation{}, errors.New("mcp requires a nested subcommand such as serve")
@@ -244,6 +320,7 @@ func parseMCPServeCLI(args []string) (cliInvocation, error) {
 	fs := flag.NewFlagSet("webcap mcp serve", flag.ContinueOnError)
 	fs.SetOutput(&stderr)
 	registerBrowserFlags(fs, &invocation.Browser)
+	registerSemanticProviderFlags(fs, &invocation.Provider)
 	if err := fs.Parse(args); err != nil {
 		message := strings.TrimSpace(stderr.String())
 		if message == "" {
@@ -255,6 +332,55 @@ func parseMCPServeCLI(args []string) (cliInvocation, error) {
 	if len(fs.Args()) != 0 {
 		return cliInvocation{}, errors.New("mcp serve does not accept positional arguments")
 	}
+	return invocation, nil
+}
+
+func parseSkillCLI(args []string) (cliInvocation, error) {
+	if len(args) == 0 {
+		return cliInvocation{}, errors.New("skill requires a nested subcommand such as install")
+	}
+	switch strings.TrimSpace(args[0]) {
+	case "install":
+		return parseSkillInstallCLI(args[1:])
+	default:
+		return cliInvocation{}, fmt.Errorf("unsupported skill subcommand %q", args[0])
+	}
+}
+
+func parseSkillInstallCLI(args []string) (cliInvocation, error) {
+	var (
+		stderr bytes.Buffer
+		agent  string
+	)
+
+	invocation := cliInvocation{
+		Command: "skill",
+		Skill: skillOptions{
+			Action: "install",
+		},
+	}
+	fs := flag.NewFlagSet("webcap skill install", flag.ContinueOnError)
+	fs.SetOutput(&stderr)
+	fs.StringVar(&agent, "agent", "", "Agent to install for: codex or claude.")
+	fs.BoolVar(&invocation.Skill.Force, "force", false, "Replace conflicting installed skill files.")
+	if err := fs.Parse(args); err != nil {
+		message := strings.TrimSpace(stderr.String())
+		if message == "" {
+			message = err.Error()
+		}
+		return cliInvocation{}, errors.New(message)
+	}
+	if len(fs.Args()) != 0 {
+		return cliInvocation{}, errors.New("skill install does not accept positional arguments")
+	}
+	if strings.TrimSpace(agent) == "" {
+		return cliInvocation{}, errors.New("skill install requires --agent codex or --agent claude")
+	}
+	parsedAgent, err := skills.ParseAgent(agent)
+	if err != nil {
+		return cliInvocation{}, err
+	}
+	invocation.Skill.Agent = parsedAgent
 	return invocation, nil
 }
 
@@ -282,6 +408,7 @@ func parseWorkflowCaptureCLI(args []string) (cliInvocation, error) {
 	fs := flag.NewFlagSet("webcap workflow capture", flag.ContinueOnError)
 	fs.SetOutput(&stderr)
 	registerBrowserFlags(fs, &invocation.Browser)
+	registerSemanticProviderFlags(fs, &invocation.Provider)
 	fs.BoolVar(&invocation.Workflow.RunReport, "run-report", false, "Generate the workflow report after captures finish.")
 	if err := fs.Parse(args); err != nil {
 		message := strings.TrimSpace(stderr.String())
@@ -321,6 +448,7 @@ func parseReportScenarioCLI(args []string) (cliInvocation, error) {
 	}
 	fs := flag.NewFlagSet("webcap report", flag.ContinueOnError)
 	fs.SetOutput(&stderr)
+	registerSemanticProviderFlags(fs, &invocation.Provider)
 	if err := fs.Parse(args); err != nil {
 		message := strings.TrimSpace(stderr.String())
 		if message == "" {
@@ -342,6 +470,33 @@ func registerBrowserFlags(fs *flag.FlagSet, browser *browserOptions) {
 	fs.StringVar(&browser.PlaywrightBrowser, "playwright-browser", "chromium", "Playwright browser: chromium, firefox, or webkit.")
 	fs.StringVar(&browser.PlaywrightNodeBinary, "node-binary", "node", "Node.js binary used by the Playwright engine.")
 	fs.StringVar(&browser.PlaywrightRuntimeDir, "playwright-runtime-dir", "", "Optional override for the Playwright runtime directory.")
+}
+
+func registerSemanticProviderFlags(fs *flag.FlagSet, provider *semanticProviderOptions) {
+	fs.StringVar(&provider.OpenAIBaseURL, "openai-base-url", "", "Override the OpenAI semantic provider endpoint.")
+	fs.StringVar(&provider.AnthropicBaseURL, "anthropic-base-url", "", "Override the Anthropic semantic provider endpoint.")
+	fs.StringVar(&provider.CodexBin, "codex-bin", "", "Codex CLI binary path.")
+	fs.StringVar(&provider.CodexProfile, "codex-profile", "", "Codex CLI profile name.")
+	fs.BoolVar(&provider.CodexOSS, "codex-oss", false, "Run Codex CLI with OSS mode.")
+	fs.StringVar(&provider.CodexLocalProvider, "codex-local-provider", "", "Codex CLI local provider name.")
+	fs.Var((*stringSliceFlag)(&provider.CodexExtraArgs), "codex-extra-arg", "Additional argument passed to codex exec; repeat for multiple values.")
+}
+
+type stringSliceFlag []string
+
+func (f *stringSliceFlag) String() string {
+	if f == nil {
+		return ""
+	}
+	return strings.Join(*f, ",")
+}
+
+func (f *stringSliceFlag) Set(value string) error {
+	value = strings.TrimSpace(value)
+	if value != "" {
+		*f = append(*f, value)
+	}
+	return nil
 }
 
 func recordVisitedBrowserFlags(fs *flag.FlagSet, browser *browserOptions) {

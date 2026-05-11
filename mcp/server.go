@@ -18,6 +18,7 @@ type Server struct {
 	version      string
 	capture      pkgwebcap.CaptureService
 	diff         pkgwebcap.DiffService
+	semanticDiff pkgwebcap.SemanticDiffService
 	loadManifest func(string) (pkgwebcap.Manifest, error)
 }
 
@@ -26,6 +27,7 @@ type Config struct {
 	Version      string
 	Capture      pkgwebcap.CaptureService
 	Diff         pkgwebcap.DiffService
+	SemanticDiff pkgwebcap.SemanticDiffService
 	LoadManifest func(string) (pkgwebcap.Manifest, error)
 }
 
@@ -46,6 +48,11 @@ func NewServer(config Config) (*Server, error) {
 	if config.LoadManifest == nil {
 		config.LoadManifest = pkgwebcap.LoadManifest
 	}
+	if config.SemanticDiff == nil {
+		if service, ok := config.Diff.(pkgwebcap.SemanticDiffService); ok {
+			config.SemanticDiff = service
+		}
+	}
 	name := strings.TrimSpace(config.Name)
 	if name == "" {
 		name = "webcap"
@@ -59,6 +66,7 @@ func NewServer(config Config) (*Server, error) {
 		version:      version,
 		capture:      config.Capture,
 		diff:         config.Diff,
+		semanticDiff: config.SemanticDiff,
 		loadManifest: config.LoadManifest,
 	}, nil
 }
@@ -219,6 +227,8 @@ func (s *Server) callTool(ctx context.Context, name string, raw json.RawMessage)
 		return s.captureManifest(ctx, raw)
 	case "compare_images":
 		return s.compareImages(ctx, raw)
+	case "semantic_diff":
+		return s.semanticDiffImages(ctx, raw)
 	default:
 		return callToolResult{}, fmt.Errorf("unknown tool %q", name)
 	}
@@ -300,4 +310,23 @@ func (s *Server) compareImages(ctx context.Context, raw json.RawMessage) (callTo
 	}
 	summary := summarizeDiffResult(result)
 	return successToolResult(summary, fmt.Sprintf("Diff completed with %d changed file(s)", summary.Summary.ChangedFiles)), nil
+}
+
+func (s *Server) semanticDiffImages(ctx context.Context, raw json.RawMessage) (callToolResult, error) {
+	if s.semanticDiff == nil {
+		return errorToolResult("semantic_diff", fmt.Errorf("webcap semantic diff service is not configured"))
+	}
+	var args semanticDiffArguments
+	if err := decodeJSON(raw, &args); err != nil {
+		return errorToolResult("semantic_diff", fmt.Errorf("invalid arguments"))
+	}
+	handler := commandwebcap.NewSemanticDiffHandler(s.semanticDiff)
+	result, err := handler.Handle(ctx, commandwebcap.SemanticDiffMessage{
+		Request: args.semanticDiffRequest(),
+	})
+	if err != nil {
+		return errorToolResult("semantic_diff", err)
+	}
+	summary := summarizeSemanticDiffResult(result)
+	return successToolResult(summary, fmt.Sprintf("Semantic diff %s with %s severity", summary.Verdict, summary.Severity)), nil
 }

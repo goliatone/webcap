@@ -2,7 +2,10 @@ package webcap
 
 import (
 	"context"
+	"net/http"
 	"time"
+
+	"github.com/goliatone/webcap/pkg/llms"
 )
 
 const (
@@ -12,8 +15,25 @@ const (
 )
 
 type Options struct {
-	Workflow WorkflowOptions
-	Now      func() time.Time
+	Workflow     WorkflowOptions
+	SemanticDiff SemanticDiffOptions
+	Now          func() time.Time
+}
+
+type SemanticDiffOptions struct {
+	Providers           map[string]SemanticDiffProvider
+	CredentialResolver  SemanticCredentialResolver
+	RedactImage         SemanticImageRedactor
+	HTTPClient          *http.Client
+	DefaultProvider     string
+	DefaultModels       map[string]string
+	DefaultTimeout      time.Duration
+	MaxImageBytes       int64
+	MaxOutputTokens     int
+	PersistRawResponses bool
+	LLMs                llms.Options
+	OpenAIBaseURL       string
+	AnthropicBaseURL    string
 }
 
 type WorkflowOptions struct {
@@ -70,19 +90,20 @@ type WorkflowArtifactLayout struct {
 }
 
 type WorkflowDefaults struct {
-	Viewport          Viewport           `json:"viewport" yaml:"viewport,omitempty"`
-	ViewportPreset    string             `json:"viewport_preset,omitempty" yaml:"viewport_preset,omitempty"`
-	DevicePreset      string             `json:"device_preset,omitempty" yaml:"device_preset,omitempty"`
-	Comparison        WorkflowComparison `json:"comparison" yaml:"comparison,omitempty"`
-	Readiness         ReadinessMode      `json:"readiness,omitempty" yaml:"readiness,omitempty"`
-	ReadinessIdle     string             `json:"readiness_idle,omitempty" yaml:"readiness_idle,omitempty"`
-	DisableAnimations bool               `json:"disable_animations,omitempty" yaml:"disable_animations,omitempty"`
-	ReducedMotion     bool               `json:"reduced_motion,omitempty" yaml:"reduced_motion,omitempty"`
-	WaitForFonts      bool               `json:"wait_for_fonts,omitempty" yaml:"wait_for_fonts,omitempty"`
-	Timeout           string             `json:"timeout,omitempty" yaml:"timeout,omitempty"`
-	Wait              string             `json:"wait,omitempty" yaml:"wait,omitempty"`
-	WaitFor           string             `json:"wait_for,omitempty" yaml:"wait_for,omitempty"`
-	FullPage          *bool              `json:"full_page,omitempty" yaml:"full_page,omitempty"`
+	Viewport          Viewport             `json:"viewport" yaml:"viewport,omitempty"`
+	ViewportPreset    string               `json:"viewport_preset,omitempty" yaml:"viewport_preset,omitempty"`
+	DevicePreset      string               `json:"device_preset,omitempty" yaml:"device_preset,omitempty"`
+	Comparison        WorkflowComparison   `json:"comparison" yaml:"comparison,omitempty"`
+	SemanticDiff      WorkflowSemanticDiff `json:"semantic_diff" yaml:"semantic_diff,omitempty"`
+	Readiness         ReadinessMode        `json:"readiness,omitempty" yaml:"readiness,omitempty"`
+	ReadinessIdle     string               `json:"readiness_idle,omitempty" yaml:"readiness_idle,omitempty"`
+	DisableAnimations bool                 `json:"disable_animations,omitempty" yaml:"disable_animations,omitempty"`
+	ReducedMotion     bool                 `json:"reduced_motion,omitempty" yaml:"reduced_motion,omitempty"`
+	WaitForFonts      bool                 `json:"wait_for_fonts,omitempty" yaml:"wait_for_fonts,omitempty"`
+	Timeout           string               `json:"timeout,omitempty" yaml:"timeout,omitempty"`
+	Wait              string               `json:"wait,omitempty" yaml:"wait,omitempty"`
+	WaitFor           string               `json:"wait_for,omitempty" yaml:"wait_for,omitempty"`
+	FullPage          *bool                `json:"full_page,omitempty" yaml:"full_page,omitempty"`
 }
 
 type WorkflowHooks struct {
@@ -114,6 +135,7 @@ type WorkflowScreen struct {
 	Query             map[string]string      `json:"query,omitempty" yaml:"query,omitempty"`
 	OutputName        string                 `json:"output_name,omitempty" yaml:"output_name,omitempty"`
 	Comparison        WorkflowComparison     `json:"comparison" yaml:"comparison,omitempty"`
+	SemanticDiff      WorkflowSemanticDiff   `json:"semantic_diff" yaml:"semantic_diff,omitempty"`
 	ReferenceImage    string                 `json:"reference_image" yaml:"reference_image"`
 	PrimaryStories    []string               `json:"primary_stories,omitempty" yaml:"primary_stories,omitempty"`
 	SupportingStories []string               `json:"supporting_stories,omitempty" yaml:"supporting_stories,omitempty"`
@@ -137,6 +159,27 @@ type WorkflowCompareRect struct {
 	Y      int `json:"y" yaml:"y"`
 	Width  int `json:"width" yaml:"width"`
 	Height int `json:"height" yaml:"height"`
+}
+
+type WorkflowSemanticDiff struct {
+	Enabled            *bool                      `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	Provider           string                     `json:"provider,omitempty" yaml:"provider,omitempty"`
+	Model              string                     `json:"model,omitempty" yaml:"model,omitempty"`
+	Mode               SemanticDiffMode           `json:"mode,omitempty" yaml:"mode,omitempty"`
+	Run                SemanticDiffRunPolicy      `json:"run,omitempty" yaml:"run,omitempty"`
+	Focus              []string                   `json:"focus,omitempty" yaml:"focus,omitempty"`
+	Prompt             string                     `json:"prompt,omitempty" yaml:"prompt,omitempty"`
+	PromptPath         string                     `json:"prompt_path,omitempty" yaml:"prompt_path,omitempty"`
+	Timeout            string                     `json:"timeout,omitempty" yaml:"timeout,omitempty"`
+	MaxOutputTokens    int                        `json:"max_output_tokens,omitempty" yaml:"max_output_tokens,omitempty"`
+	PersistRawResponse bool                       `json:"persist_raw_response,omitempty" yaml:"persist_raw_response,omitempty"`
+	RawResponsePath    string                     `json:"raw_response_path,omitempty" yaml:"raw_response_path,omitempty"`
+	AdvisoryPolicy     SemanticDiffAdvisoryPolicy `json:"advisory_policy,omitempty" yaml:"advisory_policy,omitempty"`
+	FailureSeverity    SemanticDiffSeverity       `json:"failure_severity,omitempty" yaml:"failure_severity,omitempty"`
+	FailureVerdicts    []SemanticDiffVerdict      `json:"failure_verdicts,omitempty" yaml:"failure_verdicts,omitempty"`
+	APIKey             string                     `json:"-" yaml:"api_key,omitempty"`
+	OpenAIAPIKey       string                     `json:"-" yaml:"openai_api_key,omitempty"`
+	AnthropicAPIKey    string                     `json:"-" yaml:"anthropic_api_key,omitempty"`
 }
 
 type WorkflowEvidenceItem struct {
@@ -187,6 +230,9 @@ type WorkflowReportEntry struct {
 	DiffMetadataPath           string                 `json:"diff_metadata_path,omitempty"`
 	DiffEntry                  *DiffEntry             `json:"diff_entry,omitempty"`
 	DiffSummary                *DiffSummary           `json:"diff_summary,omitempty"`
+	SemanticDiff               *SemanticDiffResult    `json:"semantic_diff,omitempty"`
+	SemanticMetadataPath       string                 `json:"semantic_metadata_path,omitempty"`
+	SemanticFailure            bool                   `json:"semantic_failure,omitempty"`
 	MissingCurrent             bool                   `json:"missing_current,omitempty"`
 	MissingReference           bool                   `json:"missing_reference,omitempty"`
 	PrimaryStories             []WorkflowStory        `json:"primary_stories,omitempty"`

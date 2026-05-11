@@ -3,14 +3,20 @@ package webcap
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"image"
 	"image/color"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/goliatone/webcap/pkg/llms"
 )
 
 type recordingEngine struct {
@@ -539,6 +545,478 @@ func TestGenerateWorkflowReportUsesComparisonAssets(t *testing.T) {
 	}
 }
 
+func TestGenerateWorkflowReportRunsSemanticDiffChangedOnly(t *testing.T) {
+	tempDir := t.TempDir()
+	referencePath := filepath.Join(tempDir, "reference.png")
+	currentPath := filepath.Join(tempDir, "artifacts", "current", "patient.png")
+	if err := writeTestPNG(referencePath, []color.NRGBA{{R: 255, G: 255, B: 255, A: 255}}); err != nil {
+		t.Fatalf("write reference: %v", err)
+	}
+	if err := writeTestPNG(currentPath, []color.NRGBA{{R: 200, G: 200, B: 200, A: 255}}); err != nil {
+		t.Fatalf("write current: %v", err)
+	}
+	provider := &fakeSemanticProvider{resp: SemanticProviderResponse{
+		Provider: "openai",
+		Model:    "gpt-test",
+		RawText:  `{"summary":"Primary CTA moved","verdict":"needs_review","severity":"major","differences":[{"area":"CTA","description":"CTA moved lower","severity":"major","evidence":"button appears lower"}]}`,
+	}}
+	scenario := WorkflowScenario{
+		ID:         "semantic-report-test",
+		Label:      "Semantic Report Test",
+		SourceDir:  tempDir,
+		SourcePath: filepath.Join(tempDir, "semantic-report-test.yaml"),
+		Environment: WorkflowEnvironment{
+			BaseURL:      "http://localhost:8383",
+			ReportFormat: WorkflowReportFormatHTML,
+		},
+		Artifacts: WorkflowArtifactLayout{
+			Root:       filepath.Join(tempDir, "artifacts"),
+			CurrentDir: filepath.Join(tempDir, "artifacts", "current"),
+			DiffDir:    filepath.Join(tempDir, "artifacts", "diff"),
+			ReportDir:  filepath.Join(tempDir, "artifacts", "report"),
+		},
+		Defaults: WorkflowDefaults{
+			SemanticDiff: WorkflowSemanticDiff{
+				Enabled:  new(true),
+				Provider: "openai",
+				Model:    "gpt-test",
+				Mode:     SemanticDiffModeFocused,
+				Run:      SemanticDiffRunChangedOnly,
+				Focus:    []string{"primary CTA"},
+			},
+		},
+		Screens: []WorkflowScreen{{
+			ID:             "patient",
+			Label:          "Patient",
+			Route:          "/triage/patient",
+			OutputName:     "patient",
+			ReferenceImage: referencePath,
+		}},
+	}
+	service := NewServiceWithOptions(nil, Options{
+		SemanticDiff: SemanticDiffOptions{
+			Providers: map[string]SemanticDiffProvider{"openai": provider},
+		},
+	})
+	result, err := service.GenerateWorkflowReport(context.Background(), WorkflowReportRequest{Scenario: scenario})
+	if err != nil {
+		t.Fatalf("GenerateWorkflowReport returned error: %v", err)
+	}
+	entry := result.Entries[0]
+	if entry.SemanticDiff == nil {
+		t.Fatal("expected semantic diff result")
+	}
+	if entry.SemanticDiff.Summary != "Primary CTA moved" || entry.SemanticMetadataPath == "" {
+		t.Fatalf("unexpected semantic result: %#v", entry.SemanticDiff)
+	}
+	if len(provider.lastReq.Images) != 3 {
+		t.Fatalf("expected semantic provider to receive current/reference/diff images, got %d", len(provider.lastReq.Images))
+	}
+	if _, err := os.Stat(entry.SemanticMetadataPath); err != nil {
+		t.Fatalf("expected semantic metadata path: %v", err)
+	}
+	reportHTML, err := os.ReadFile(result.ReportPath)
+	if err != nil {
+		t.Fatalf("read report html: %v", err)
+	}
+	if !strings.Contains(string(reportHTML), "Semantic Diff") || !strings.Contains(string(reportHTML), "Primary CTA moved") || !strings.Contains(string(reportHTML), "CTA moved lower") {
+		t.Fatalf("expected semantic findings in report html")
+	}
+}
+
+func TestGenerateWorkflowReportUsesDefaultBuiltInSemanticProvider(t *testing.T) {
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.Header.Get("Authorization") != "Bearer workflow-key" {
+			t.Fatalf("expected OpenAI auth header, got %q", r.Header.Get("Authorization"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"model":"gpt-test","output":[{"type":"message","content":[{"type":"output_text","text":"{\"summary\":\"Workflow semantic ok\",\"verdict\":\"needs_review\",\"severity\":\"minor\"}"}]}]}`))
+	}))
+	defer server.Close()
+
+	tempDir := t.TempDir()
+	referencePath := filepath.Join(tempDir, "reference.png")
+	currentPath := filepath.Join(tempDir, "artifacts", "current", "patient.png")
+	if err := writeTestPNG(referencePath, []color.NRGBA{{R: 255, G: 255, B: 255, A: 255}}); err != nil {
+		t.Fatalf("write reference: %v", err)
+	}
+	if err := writeTestPNG(currentPath, []color.NRGBA{{R: 200, G: 200, B: 200, A: 255}}); err != nil {
+		t.Fatalf("write current: %v", err)
+	}
+
+	scenario := WorkflowScenario{
+		ID:        "semantic-default-provider-test",
+		SourceDir: tempDir,
+		Environment: WorkflowEnvironment{
+			BaseURL:      "http://localhost:8383",
+			ReportFormat: WorkflowReportFormatHTML,
+		},
+		Artifacts: WorkflowArtifactLayout{
+			Root:       filepath.Join(tempDir, "artifacts"),
+			CurrentDir: filepath.Join(tempDir, "artifacts", "current"),
+			DiffDir:    filepath.Join(tempDir, "artifacts", "diff"),
+			ReportDir:  filepath.Join(tempDir, "artifacts", "report"),
+		},
+		Defaults: WorkflowDefaults{
+			SemanticDiff: WorkflowSemanticDiff{
+				Enabled:  new(true),
+				Provider: "openai",
+				Model:    "gpt-test",
+				Run:      SemanticDiffRunAlways,
+			},
+		},
+		Screens: []WorkflowScreen{{
+			ID:             "patient",
+			Route:          "/triage/patient",
+			OutputName:     "patient",
+			ReferenceImage: referencePath,
+		}},
+	}
+	service := NewServiceWithOptions(nil, Options{SemanticDiff: SemanticDiffOptions{
+		CredentialResolver: func(context.Context, string) (string, error) { return "workflow-key", nil },
+		OpenAIBaseURL:      server.URL,
+	}})
+	result, err := service.GenerateWorkflowReport(context.Background(), WorkflowReportRequest{Scenario: scenario})
+	if err != nil {
+		t.Fatalf("GenerateWorkflowReport returned error: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("expected one built-in provider call, got %d", calls)
+	}
+	if result.Entries[0].SemanticDiff == nil || result.Entries[0].SemanticDiff.Summary != "Workflow semantic ok" {
+		t.Fatalf("unexpected semantic result: %#v", result.Entries[0].SemanticDiff)
+	}
+}
+
+func TestGenerateWorkflowReportUsesCodexCLIProvider(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fake uses POSIX sh")
+	}
+	tempDir := t.TempDir()
+	referencePath := filepath.Join(tempDir, "reference.png")
+	currentPath := filepath.Join(tempDir, "artifacts", "current", "patient.png")
+	if err := writeTestPNG(referencePath, []color.NRGBA{{R: 255, G: 255, B: 255, A: 255}}); err != nil {
+		t.Fatalf("write reference: %v", err)
+	}
+	if err := writeTestPNG(currentPath, []color.NRGBA{{R: 200, G: 200, B: 200, A: 255}}); err != nil {
+		t.Fatalf("write current: %v", err)
+	}
+	fake := writeWorkflowFakeCodex(t, tempDir, `#!/bin/sh
+cat >/dev/null
+printf '{"summary":"Workflow codex ok","verdict":"no_meaningful_change","severity":"info"}\n'
+`)
+
+	scenario := WorkflowScenario{
+		ID:        "semantic-codex-provider-test",
+		SourceDir: tempDir,
+		Environment: WorkflowEnvironment{
+			BaseURL:      "http://localhost:8383",
+			ReportFormat: WorkflowReportFormatHTML,
+		},
+		Artifacts: WorkflowArtifactLayout{
+			Root:       filepath.Join(tempDir, "artifacts"),
+			CurrentDir: filepath.Join(tempDir, "artifacts", "current"),
+			DiffDir:    filepath.Join(tempDir, "artifacts", "diff"),
+			ReportDir:  filepath.Join(tempDir, "artifacts", "report"),
+		},
+		Defaults: WorkflowDefaults{
+			SemanticDiff: WorkflowSemanticDiff{
+				Enabled:  new(true),
+				Provider: "codex-cli",
+				Model:    "gpt-test",
+				Run:      SemanticDiffRunAlways,
+			},
+		},
+		Screens: []WorkflowScreen{{
+			ID:             "patient",
+			Route:          "/triage/patient",
+			OutputName:     "patient",
+			ReferenceImage: referencePath,
+		}},
+	}
+	service := NewServiceWithOptions(nil, Options{SemanticDiff: SemanticDiffOptions{
+		LLMs: llms.Options{CodexCLI: llms.CodexCLIOptions{CommandPath: fake}},
+	}})
+	result, err := service.GenerateWorkflowReport(context.Background(), WorkflowReportRequest{Scenario: scenario})
+	if err != nil {
+		t.Fatalf("GenerateWorkflowReport returned error: %v", err)
+	}
+	if result.Entries[0].SemanticDiff == nil || result.Entries[0].SemanticDiff.Summary != "Workflow codex ok" {
+		t.Fatalf("unexpected semantic result: %#v", result.Entries[0].SemanticDiff)
+	}
+}
+
+func TestGenerateWorkflowReportUsesRegisteredLLMSProvider(t *testing.T) {
+	tempDir := t.TempDir()
+	referencePath := filepath.Join(tempDir, "reference.png")
+	currentPath := filepath.Join(tempDir, "artifacts", "current", "patient.png")
+	if err := writeTestPNG(referencePath, []color.NRGBA{{R: 255, G: 255, B: 255, A: 255}}); err != nil {
+		t.Fatalf("write reference: %v", err)
+	}
+	if err := writeTestPNG(currentPath, []color.NRGBA{{R: 200, G: 200, B: 200, A: 255}}); err != nil {
+		t.Fatalf("write current: %v", err)
+	}
+	provider := &recordingLLMSProvider{name: "local-fake", resp: llms.Response{
+		Provider: "local-fake",
+		Model:    "local-model",
+		RawText:  `{"summary":"Workflow local provider ok","verdict":"no_meaningful_change","severity":"info"}`,
+	}}
+	scenario := WorkflowScenario{
+		ID:        "semantic-local-provider-test",
+		SourceDir: tempDir,
+		Environment: WorkflowEnvironment{
+			BaseURL:      "http://localhost:8383",
+			ReportFormat: WorkflowReportFormatHTML,
+		},
+		Artifacts: WorkflowArtifactLayout{
+			Root:       filepath.Join(tempDir, "artifacts"),
+			CurrentDir: filepath.Join(tempDir, "artifacts", "current"),
+			DiffDir:    filepath.Join(tempDir, "artifacts", "diff"),
+			ReportDir:  filepath.Join(tempDir, "artifacts", "report"),
+		},
+		Defaults: WorkflowDefaults{
+			SemanticDiff: WorkflowSemanticDiff{
+				Enabled:  new(true),
+				Provider: "local-fake",
+				Model:    "local-model",
+				Run:      SemanticDiffRunAlways,
+			},
+		},
+		Screens: []WorkflowScreen{{
+			ID:             "patient",
+			Route:          "/triage/patient",
+			OutputName:     "patient",
+			ReferenceImage: referencePath,
+		}},
+	}
+	service := NewServiceWithOptions(nil, Options{SemanticDiff: SemanticDiffOptions{
+		LLMs: llms.Options{Providers: map[string]llms.Provider{"local-fake": provider}},
+	}})
+	result, err := service.GenerateWorkflowReport(context.Background(), WorkflowReportRequest{Scenario: scenario})
+	if err != nil {
+		t.Fatalf("GenerateWorkflowReport returned error: %v", err)
+	}
+	if provider.lastReq.Provider != "local-fake" || provider.lastReq.Model != "local-model" {
+		t.Fatalf("registered LLM provider was not selected: %#v", provider.lastReq)
+	}
+	if result.Entries[0].SemanticDiff == nil || result.Entries[0].SemanticDiff.Summary != "Workflow local provider ok" {
+		t.Fatalf("unexpected semantic result: %#v", result.Entries[0].SemanticDiff)
+	}
+}
+
+func TestWorkflowSemanticDiffChangedOnlySkipsUnchanged(t *testing.T) {
+	tempDir := t.TempDir()
+	referencePath := filepath.Join(tempDir, "reference.png")
+	currentPath := filepath.Join(tempDir, "artifacts", "current", "patient.png")
+	if err := writeTestPNG(referencePath, []color.NRGBA{{R: 255, G: 255, B: 255, A: 255}}); err != nil {
+		t.Fatalf("write reference: %v", err)
+	}
+	if err := writeTestPNG(currentPath, []color.NRGBA{{R: 255, G: 255, B: 255, A: 255}}); err != nil {
+		t.Fatalf("write current: %v", err)
+	}
+	provider := &fakeSemanticProvider{resp: SemanticProviderResponse{
+		Provider: "openai",
+		RawText:  `{"summary":"ok","verdict":"no_meaningful_change","severity":"info"}`,
+	}}
+	scenario := WorkflowScenario{
+		ID:        "semantic-skip-test",
+		SourceDir: tempDir,
+		Environment: WorkflowEnvironment{
+			BaseURL:      "http://localhost:8383",
+			ReportFormat: WorkflowReportFormatHTML,
+		},
+		Artifacts: WorkflowArtifactLayout{
+			Root:       filepath.Join(tempDir, "artifacts"),
+			CurrentDir: filepath.Join(tempDir, "artifacts", "current"),
+			DiffDir:    filepath.Join(tempDir, "artifacts", "diff"),
+			ReportDir:  filepath.Join(tempDir, "artifacts", "report"),
+		},
+		Defaults: WorkflowDefaults{
+			SemanticDiff: WorkflowSemanticDiff{
+				Enabled:  new(true),
+				Provider: "openai",
+				Run:      SemanticDiffRunChangedOnly,
+			},
+		},
+		Screens: []WorkflowScreen{{
+			ID:             "patient",
+			Route:          "/triage/patient",
+			OutputName:     "patient",
+			ReferenceImage: referencePath,
+		}},
+	}
+	service := NewServiceWithOptions(nil, Options{SemanticDiff: SemanticDiffOptions{Providers: map[string]SemanticDiffProvider{"openai": provider}}})
+	result, err := service.GenerateWorkflowReport(context.Background(), WorkflowReportRequest{Scenario: scenario})
+	if err != nil {
+		t.Fatalf("GenerateWorkflowReport returned error: %v", err)
+	}
+	if result.Entries[0].SemanticDiff != nil {
+		t.Fatalf("expected semantic diff to be skipped for unchanged pixel diff")
+	}
+	if provider.lastReq.Prompt != "" {
+		t.Fatalf("expected provider not to be called")
+	}
+}
+
+func TestWorkflowSemanticDiffProviderFailureBecomesWarning(t *testing.T) {
+	tempDir := t.TempDir()
+	referencePath := filepath.Join(tempDir, "reference.png")
+	currentPath := filepath.Join(tempDir, "artifacts", "current", "patient.png")
+	if err := writeTestPNG(referencePath, []color.NRGBA{{R: 255, G: 255, B: 255, A: 255}}); err != nil {
+		t.Fatalf("write reference: %v", err)
+	}
+	if err := writeTestPNG(currentPath, []color.NRGBA{{R: 200, G: 200, B: 200, A: 255}}); err != nil {
+		t.Fatalf("write current: %v", err)
+	}
+	scenario := WorkflowScenario{
+		ID:        "semantic-warning-test",
+		SourceDir: tempDir,
+		Environment: WorkflowEnvironment{
+			BaseURL:      "http://localhost:8383",
+			ReportFormat: WorkflowReportFormatHTML,
+		},
+		Artifacts: WorkflowArtifactLayout{
+			Root:       filepath.Join(tempDir, "artifacts"),
+			CurrentDir: filepath.Join(tempDir, "artifacts", "current"),
+			DiffDir:    filepath.Join(tempDir, "artifacts", "diff"),
+			ReportDir:  filepath.Join(tempDir, "artifacts", "report"),
+		},
+		Defaults: WorkflowDefaults{
+			SemanticDiff: WorkflowSemanticDiff{
+				Enabled:  new(true),
+				Provider: "openai",
+				Run:      SemanticDiffRunAlways,
+			},
+		},
+		Screens: []WorkflowScreen{{
+			ID:             "patient",
+			Route:          "/triage/patient",
+			OutputName:     "patient",
+			ReferenceImage: referencePath,
+		}},
+	}
+	service := NewServiceWithOptions(nil, Options{SemanticDiff: SemanticDiffOptions{
+		Providers: map[string]SemanticDiffProvider{"openai": &fakeSemanticProvider{name: "openai", err: errors.New("semantic unavailable")}},
+	}})
+	result, err := service.GenerateWorkflowReport(context.Background(), WorkflowReportRequest{Scenario: scenario})
+	if err != nil {
+		t.Fatalf("GenerateWorkflowReport returned error: %v", err)
+	}
+	if result.Entries[0].SemanticDiff != nil {
+		t.Fatal("expected no semantic result after provider failure")
+	}
+	if len(result.Entries[0].Warnings) == 0 || result.Entries[0].Status.Level != workflowStatusWarning {
+		t.Fatalf("expected semantic provider failure warning, got entry %#v", result.Entries[0])
+	}
+}
+
+func TestWorkflowSemanticDiffRawResponseRequiresProcessEnablement(t *testing.T) {
+	tempDir := t.TempDir()
+	referencePath := filepath.Join(tempDir, "reference.png")
+	currentPath := filepath.Join(tempDir, "artifacts", "current", "patient.png")
+	rawPath := filepath.Join(tempDir, "semantic.raw.txt")
+	if err := writeTestPNG(referencePath, []color.NRGBA{{R: 255, G: 255, B: 255, A: 255}}); err != nil {
+		t.Fatalf("write reference: %v", err)
+	}
+	if err := writeTestPNG(currentPath, []color.NRGBA{{R: 200, G: 200, B: 200, A: 255}}); err != nil {
+		t.Fatalf("write current: %v", err)
+	}
+	scenario := WorkflowScenario{
+		ID:        "semantic-raw-test",
+		SourceDir: tempDir,
+		Environment: WorkflowEnvironment{
+			BaseURL:      "http://localhost:8383",
+			ReportFormat: WorkflowReportFormatHTML,
+		},
+		Artifacts: WorkflowArtifactLayout{
+			Root:       filepath.Join(tempDir, "artifacts"),
+			CurrentDir: filepath.Join(tempDir, "artifacts", "current"),
+			DiffDir:    filepath.Join(tempDir, "artifacts", "diff"),
+			ReportDir:  filepath.Join(tempDir, "artifacts", "report"),
+		},
+		Defaults: WorkflowDefaults{
+			SemanticDiff: WorkflowSemanticDiff{
+				Enabled:            new(true),
+				Provider:           "openai",
+				Model:              "gpt-test",
+				Run:                SemanticDiffRunAlways,
+				PersistRawResponse: true,
+				RawResponsePath:    rawPath,
+			},
+		},
+		Screens: []WorkflowScreen{{
+			ID:             "patient",
+			Route:          "/triage/patient",
+			OutputName:     "patient",
+			ReferenceImage: referencePath,
+		}},
+	}
+	service := NewServiceWithOptions(nil, Options{SemanticDiff: SemanticDiffOptions{
+		Providers: map[string]SemanticDiffProvider{"openai": &fakeSemanticProvider{name: "openai", resp: SemanticProviderResponse{
+			Provider: "openai",
+			Model:    "gpt-test",
+			RawText:  `{"summary":"ok","verdict":"no_meaningful_change","severity":"info"}`,
+		}}},
+	}})
+	result, err := service.GenerateWorkflowReport(context.Background(), WorkflowReportRequest{Scenario: scenario})
+	if err != nil {
+		t.Fatalf("GenerateWorkflowReport returned error: %v", err)
+	}
+	if result.Entries[0].SemanticDiff == nil {
+		t.Fatal("expected semantic diff result")
+	}
+	if result.Entries[0].SemanticDiff.RawResponsePath != "" {
+		t.Fatalf("expected raw response path to be omitted without process enablement: %#v", result.Entries[0].SemanticDiff)
+	}
+	if _, err := os.Stat(rawPath); !os.IsNotExist(err) {
+		t.Fatalf("expected raw response file to be absent, stat err=%v", err)
+	}
+}
+
+func TestWorkflowSemanticDiffRejectsCredentialFields(t *testing.T) {
+	tempDir := t.TempDir()
+	referencePath := filepath.Join(tempDir, "reference.png")
+	if err := writeTestPNG(referencePath, []color.NRGBA{{A: 255}}); err != nil {
+		t.Fatalf("write reference: %v", err)
+	}
+	scenario := WorkflowScenario{
+		ID:        "semantic-credential-test",
+		SourceDir: tempDir,
+		Environment: WorkflowEnvironment{
+			BaseURL: "http://localhost:8383",
+		},
+		Defaults: WorkflowDefaults{
+			SemanticDiff: WorkflowSemanticDiff{
+				Enabled: new(true),
+				APIKey:  "secret",
+			},
+		},
+		Screens: []WorkflowScreen{{
+			ID:             "patient",
+			Route:          "/triage/patient",
+			ReferenceImage: referencePath,
+		}},
+	}
+	if err := normalizeWorkflowScenario(&scenario, WorkflowOptions{}); err == nil {
+		t.Fatal("expected semantic diff credential validation error")
+	}
+}
+
+func TestWorkflowSemanticDiffPolicyCanEscalate(t *testing.T) {
+	result := SemanticDiffResult{Severity: SemanticDiffSeverityMajor, Verdict: SemanticDiffVerdictRegression}
+	if workflowSemanticDiffFailsPolicy(WorkflowSemanticDiff{AdvisoryPolicy: SemanticDiffAdvisoryOnly, FailureSeverity: SemanticDiffSeverityMajor}, result) {
+		t.Fatal("expected advisory policy to avoid semantic failure")
+	}
+	if !workflowSemanticDiffFailsPolicy(WorkflowSemanticDiff{AdvisoryPolicy: SemanticDiffAdvisoryEnforce, FailureSeverity: SemanticDiffSeverityMajor}, result) {
+		t.Fatal("expected major severity to fail explicit policy")
+	}
+	if !workflowSemanticDiffFailsPolicy(WorkflowSemanticDiff{AdvisoryPolicy: SemanticDiffAdvisoryEnforce, FailureVerdicts: []SemanticDiffVerdict{SemanticDiffVerdictRegression}}, result) {
+		t.Fatal("expected regression verdict to fail explicit policy")
+	}
+}
+
 func TestGenerateWorkflowReportRendersMultiScreenStoryComparison(t *testing.T) {
 	tempDir := t.TempDir()
 	patientReferencePath := filepath.Join(tempDir, "patient-reference.png")
@@ -669,6 +1147,15 @@ func writeWorkflowStoryFixture(t *testing.T, path string) {
 	if err := os.WriteFile(path, []byte(payload), 0o644); err != nil {
 		t.Fatalf("write story fixture: %v", err)
 	}
+}
+
+func writeWorkflowFakeCodex(t *testing.T, dir, body string) string {
+	t.Helper()
+	path := filepath.Join(dir, "codex-fake")
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatalf("write fake codex: %v", err)
+	}
+	return path
 }
 
 func writeWorkflowScenarioFixture(t *testing.T, dir string) string {

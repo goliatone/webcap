@@ -4,14 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 
 	pkgwebcap "github.com/goliatone/webcap"
 	commandwebcap "github.com/goliatone/webcap/commands/webcap"
 	webcapmcp "github.com/goliatone/webcap/mcp"
+	"github.com/goliatone/webcap/pkg/agents/skills"
+	"github.com/goliatone/webcap/pkg/llms"
 	"github.com/goliatone/webcap/pkg/version"
 )
+
+const webcapAgentSkillName = "webcap-agent"
+
+var skillSourceFS func() fs.FS = webcapAgentSkillSource
 
 func main() {
 	invocation, err := parseCLI(os.Args[1:])
@@ -26,20 +33,56 @@ func main() {
 
 func run(ctx context.Context, invocation cliInvocation) error {
 	handlers := map[string]func(context.Context, cliInvocation) error{
-		"help":     runHelp,
-		"version":  runVersion,
-		"shot":     runShot,
-		"multi":    runMulti,
-		"diff":     runDiff,
-		"mcp":      runMCP,
-		"workflow": runWorkflow,
-		"report":   runReport,
+		"help":          runHelp,
+		"version":       runVersion,
+		"shot":          runShot,
+		"multi":         runMulti,
+		"diff":          runDiff,
+		"semantic-diff": runSemanticDiff,
+		"mcp":           runMCP,
+		"workflow":      runWorkflow,
+		"report":        runReport,
+		"skill":         runSkill,
 	}
 	handler, ok := handlers[invocation.Command]
 	if !ok {
 		return fmt.Errorf("unsupported command %q", invocation.Command)
 	}
 	return handler(ctx, invocation)
+}
+
+func runSkill(ctx context.Context, invocation cliInvocation) error {
+	if invocation.Skill.Action != "install" {
+		return fmt.Errorf("unsupported skill action %q", invocation.Skill.Action)
+	}
+	handler := commandwebcap.NewSkillInstallHandler()
+	result, err := handler.Handle(ctx, commandwebcap.SkillInstallMessage{
+		Request: skills.InstallRequest{
+			Agent:     invocation.Skill.Agent,
+			SkillName: webcapAgentSkillName,
+			Source:    skillSourceFS(),
+			SourceDir: webcapAgentSkillName,
+			Force:     invocation.Skill.Force,
+		},
+	})
+	if err != nil {
+		return err
+	}
+	printJSON(result)
+	return nil
+}
+
+func runSemanticDiff(ctx context.Context, invocation cliInvocation) error {
+	service := pkgwebcap.NewServiceWithOptions(nil, semanticServiceOptions(invocation.Provider))
+	handler := commandwebcap.NewSemanticDiffHandler(service)
+	result, err := handler.Handle(ctx, commandwebcap.SemanticDiffMessage{
+		Request: invocation.Semantic.Request,
+	})
+	if err != nil {
+		return err
+	}
+	printJSON(result)
+	return nil
 }
 
 func runHelp(_ context.Context, _ cliInvocation) error {
@@ -52,7 +95,7 @@ func runVersion(_ context.Context, _ cliInvocation) error {
 }
 
 func runShot(ctx context.Context, invocation cliInvocation) error {
-	service := newCaptureService(invocation.Browser)
+	service := newCaptureService(invocation.Browser, invocation.Provider)
 	handler := commandwebcap.NewCaptureShotHandler(service)
 	result, err := handler.Handle(ctx, commandwebcap.CaptureShotMessage{
 		Request: invocation.Shot.Request,
@@ -69,7 +112,7 @@ func runMulti(ctx context.Context, invocation cliInvocation) error {
 	if err != nil {
 		return err
 	}
-	service := newCaptureService(invocation.Browser)
+	service := newCaptureService(invocation.Browser, invocation.Provider)
 	handler := commandwebcap.NewCaptureBatchHandler(service)
 	result, err := handler.Handle(ctx, commandwebcap.CaptureBatchMessage{
 		Manifest:  manifest,
@@ -99,12 +142,13 @@ func runMCP(ctx context.Context, invocation cliInvocation) error {
 	if invocation.MCP.Action != "serve" {
 		return fmt.Errorf("unsupported mcp action %q", invocation.MCP.Action)
 	}
-	service := newCaptureService(invocation.Browser)
+	service := newCaptureService(invocation.Browser, invocation.Provider)
 	server, err := webcapmcp.NewServer(webcapmcp.Config{
 		Name:         "webcap",
 		Version:      version.Tag,
 		Capture:      service,
 		Diff:         service,
+		SemanticDiff: service,
 		LoadManifest: pkgwebcap.LoadManifest,
 	})
 	if err != nil {
@@ -118,7 +162,7 @@ func runWorkflow(ctx context.Context, invocation cliInvocation) error {
 	if err != nil {
 		return err
 	}
-	service := newScenarioCaptureService(invocation.Browser, scenario)
+	service := newScenarioCaptureService(invocation.Browser, invocation.Provider, scenario)
 	handler := commandwebcap.NewCaptureScenarioHandler(service)
 	captureResult, err := handler.Handle(ctx, commandwebcap.CaptureScenarioMessage{
 		Scenario: scenario,
@@ -156,7 +200,7 @@ func runReport(ctx context.Context, invocation cliInvocation) error {
 	if err != nil {
 		return err
 	}
-	service := pkgwebcap.NewService(nil)
+	service := pkgwebcap.NewServiceWithOptions(nil, semanticServiceOptions(invocation.Provider))
 	handler := commandwebcap.NewWorkflowReportHandler(service)
 	result, err := handler.Handle(ctx, commandwebcap.WorkflowReportMessage{
 		Request: pkgwebcap.WorkflowReportRequest{Scenario: scenario},
@@ -168,20 +212,36 @@ func runReport(ctx context.Context, invocation cliInvocation) error {
 	return nil
 }
 
-func newCaptureService(browser browserOptions) *pkgwebcap.Service {
+func newCaptureService(browser browserOptions, provider semanticProviderOptions) *pkgwebcap.Service {
 	engine, err := pkgwebcap.NewEngine(browserEngineConfig(browser))
 	if err != nil {
 		log.Fatal(err)
 	}
-	return pkgwebcap.NewService(engine)
+	return pkgwebcap.NewServiceWithOptions(engine, semanticServiceOptions(provider))
 }
 
-func newScenarioCaptureService(browser browserOptions, scenario pkgwebcap.WorkflowScenario) *pkgwebcap.Service {
+func newScenarioCaptureService(browser browserOptions, provider semanticProviderOptions, scenario pkgwebcap.WorkflowScenario) *pkgwebcap.Service {
 	engine, err := pkgwebcap.NewEngine(mergeScenarioEngineConfig(browser, scenario))
 	if err != nil {
 		log.Fatal(err)
 	}
-	return pkgwebcap.NewService(engine)
+	return pkgwebcap.NewServiceWithOptions(engine, semanticServiceOptions(provider))
+}
+
+func semanticServiceOptions(provider semanticProviderOptions) pkgwebcap.Options {
+	return pkgwebcap.Options{SemanticDiff: pkgwebcap.SemanticDiffOptions{
+		OpenAIBaseURL:    provider.OpenAIBaseURL,
+		AnthropicBaseURL: provider.AnthropicBaseURL,
+		LLMs: llms.Options{
+			CodexCLI: llms.CodexCLIOptions{
+				CommandPath:   provider.CodexBin,
+				Profile:       provider.CodexProfile,
+				UseOSS:        provider.CodexOSS,
+				LocalProvider: provider.CodexLocalProvider,
+				ExtraArgs:     append([]string(nil), provider.CodexExtraArgs...),
+			},
+		},
+	}}
 }
 
 func browserEngineConfig(browser browserOptions) pkgwebcap.EngineConfig {
@@ -266,9 +326,11 @@ Usage:
   webcap shot [flags] <url>
   webcap multi [flags] <manifest-path>
   webcap diff [flags] <base-path> <compare-path>
+  webcap semantic-diff [flags] <current-image> <reference-image>
   webcap workflow capture-scenario [flags] <scenario-path>
   webcap report scenario <scenario-path>
   webcap mcp serve [flags]
+  webcap skill install --agent <codex|claude> [--force]
 
 Commands:
   help                         Show this help message.
@@ -276,9 +338,11 @@ Commands:
   shot                         Capture a single URL.
   multi                        Run a YAML or JSON capture manifest.
   diff                         Compare two image artifacts.
+  semantic-diff                Compare two image artifacts with a vision LLM provider.
   workflow capture-scenario    Capture every screen in a workflow scenario.
   report scenario              Generate a workflow HTML review report.
   mcp serve                    Start the stdio MCP server.
+  skill install                Install the bundled webcap-agent skill.
 
 Common browser flags:
   --engine                     Capture engine: chromium or playwright.
@@ -287,4 +351,13 @@ Common browser flags:
   --playwright-browser         Playwright browser: chromium, firefox, or webkit.
   --node-binary                Node.js binary used by the Playwright engine.
   --playwright-runtime-dir     Optional override for the Playwright runtime directory.
+
+Semantic provider flags:
+  --openai-base-url            Override the OpenAI semantic provider endpoint.
+  --anthropic-base-url         Override the Anthropic semantic provider endpoint.
+  --codex-bin                  Codex CLI binary path.
+  --codex-profile              Codex CLI profile name.
+  --codex-oss                  Run Codex CLI with OSS mode.
+  --codex-local-provider       Codex CLI local provider name.
+  --codex-extra-arg            Additional argument passed to codex exec; repeat for multiple values.
 `

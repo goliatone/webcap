@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	pkgwebcap "github.com/goliatone/webcap"
+	"github.com/goliatone/webcap/pkg/agents/skills"
 )
 
 func TestParseShotCLI(t *testing.T) {
@@ -63,6 +64,59 @@ func TestParseDiffCLI(t *testing.T) {
 	}
 	if invocation.Diff.Request.OutputPath != "diffs" {
 		t.Fatalf("unexpected output path: %s", invocation.Diff.Request.OutputPath)
+	}
+}
+
+func TestParseSemanticDiffCLI(t *testing.T) {
+	invocation, err := parseCLI([]string{
+		"semantic-diff",
+		"--provider", "openai",
+		"--model", "gpt-test",
+		"--mode", "focused",
+		"--prompt", "Check checkout CTA.",
+		"--focus", "checkout button,navigation labels",
+		"--metadata", "semantic.json",
+		"--timeout", "45s",
+		"--max-output-tokens", "500",
+		"--openai-base-url", "https://openai.test/v1/responses",
+		"--anthropic-base-url", "https://anthropic.test/v1/messages",
+		"--codex-bin", "/usr/local/bin/codex",
+		"--codex-profile", "work",
+		"--codex-oss",
+		"--codex-local-provider", "ollama",
+		"--codex-extra-arg", "--reasoning-effort",
+		"--codex-extra-arg", "low",
+		"--pixel-diff-image", "diff.png",
+		"--changed-pixels", "10",
+		"--total-pixels", "100",
+		"--changed-percent", "10",
+		"current.png",
+		"reference.png",
+	})
+	if err != nil {
+		t.Fatalf("parseCLI returned error: %v", err)
+	}
+	if invocation.Command != "semantic-diff" {
+		t.Fatalf("unexpected command: %s", invocation.Command)
+	}
+	req := invocation.Semantic.Request
+	if req.CurrentPath != "current.png" || req.ReferencePath != "reference.png" || req.Provider != "openai" || req.Model != "gpt-test" {
+		t.Fatalf("unexpected semantic request: %#v", req)
+	}
+	if req.Mode != pkgwebcap.SemanticDiffModeFocused || len(req.Focus) != 2 || req.PixelContext.PixelDiffImagePath != "diff.png" {
+		t.Fatalf("unexpected semantic options: %#v", req)
+	}
+	if req.MaxOutputTokens != 500 || req.Timeout != "45s" || req.MetadataPath != "semantic.json" {
+		t.Fatalf("unexpected semantic limits/metadata: %#v", req)
+	}
+	if invocation.Provider.OpenAIBaseURL != "https://openai.test/v1/responses" || invocation.Provider.AnthropicBaseURL != "https://anthropic.test/v1/messages" {
+		t.Fatalf("unexpected semantic provider options: %#v", invocation.Provider)
+	}
+	if invocation.Provider.CodexBin != "/usr/local/bin/codex" || invocation.Provider.CodexProfile != "work" || !invocation.Provider.CodexOSS || invocation.Provider.CodexLocalProvider != "ollama" {
+		t.Fatalf("unexpected codex provider options: %#v", invocation.Provider)
+	}
+	if len(invocation.Provider.CodexExtraArgs) != 2 || invocation.Provider.CodexExtraArgs[0] != "--reasoning-effort" || invocation.Provider.CodexExtraArgs[1] != "low" {
+		t.Fatalf("unexpected codex extra args: %#v", invocation.Provider.CodexExtraArgs)
 	}
 }
 
@@ -155,6 +209,7 @@ func TestParseMCPServeCLI(t *testing.T) {
 		"serve",
 		"--engine", "playwright",
 		"--playwright-browser", "webkit",
+		"--openai-base-url", "https://openai.test/v1/responses",
 	})
 	if err != nil {
 		t.Fatalf("parseCLI returned error: %v", err)
@@ -171,6 +226,9 @@ func TestParseMCPServeCLI(t *testing.T) {
 	if invocation.Browser.PlaywrightBrowser != "webkit" {
 		t.Fatalf("unexpected browser: %s", invocation.Browser.PlaywrightBrowser)
 	}
+	if invocation.Provider.OpenAIBaseURL != "https://openai.test/v1/responses" {
+		t.Fatalf("unexpected provider options: %#v", invocation.Provider)
+	}
 }
 
 func TestParseWorkflowCaptureScenarioCLI(t *testing.T) {
@@ -180,6 +238,7 @@ func TestParseWorkflowCaptureScenarioCLI(t *testing.T) {
 		"--engine", "playwright",
 		"--playwright-browser", "firefox",
 		"--run-report",
+		"--anthropic-base-url", "https://anthropic.test/v1/messages",
 		"workflow.yaml",
 	})
 	if err != nil {
@@ -203,6 +262,9 @@ func TestParseWorkflowCaptureScenarioCLI(t *testing.T) {
 	if !invocation.Browser.EngineSet || !invocation.Browser.PlaywrightBrowserSet {
 		t.Fatal("expected explicit workflow browser flags to be tracked")
 	}
+	if invocation.Provider.AnthropicBaseURL != "https://anthropic.test/v1/messages" {
+		t.Fatalf("unexpected provider options: %#v", invocation.Provider)
+	}
 }
 
 func TestParseWorkflowCaptureMVPCLI(t *testing.T) {
@@ -212,7 +274,7 @@ func TestParseWorkflowCaptureMVPCLI(t *testing.T) {
 }
 
 func TestParseReportScenarioCLI(t *testing.T) {
-	invocation, err := parseCLI([]string{"report", "scenario", "workflow.yaml"})
+	invocation, err := parseCLI([]string{"report", "scenario", "--openai-base-url", "https://openai.test/v1/responses", "workflow.yaml"})
 	if err != nil {
 		t.Fatalf("parseCLI returned error: %v", err)
 	}
@@ -225,10 +287,66 @@ func TestParseReportScenarioCLI(t *testing.T) {
 	if invocation.Report.ScenarioPath != "workflow.yaml" {
 		t.Fatalf("unexpected scenario path: %s", invocation.Report.ScenarioPath)
 	}
+	if invocation.Provider.OpenAIBaseURL != "https://openai.test/v1/responses" {
+		t.Fatalf("unexpected provider options: %#v", invocation.Provider)
+	}
 }
 
 func TestParseReportMVPCLI(t *testing.T) {
 	if _, err := parseCLI([]string{"report", "mvp"}); err == nil {
 		t.Fatal("expected report mvp to be unsupported in standalone CLI")
+	}
+}
+
+func TestParseSkillInstallCLI(t *testing.T) {
+	tests := []struct {
+		name  string
+		agent string
+		want  skills.Agent
+	}{
+		{name: "codex", agent: "codex", want: skills.AgentCodex},
+		{name: "claude", agent: "claude", want: skills.AgentClaude},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			invocation, err := parseCLI([]string{"skill", "install", "--agent", tt.agent})
+			if err != nil {
+				t.Fatalf("parseCLI returned error: %v", err)
+			}
+			if invocation.Command != "skill" || invocation.Skill.Action != "install" {
+				t.Fatalf("unexpected skill invocation: %#v", invocation)
+			}
+			if invocation.Skill.Agent != tt.want {
+				t.Fatalf("unexpected agent: got %q want %q", invocation.Skill.Agent, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseSkillInstallCLIWithForce(t *testing.T) {
+	invocation, err := parseCLI([]string{"skill", "install", "--agent", "codex", "--force"})
+	if err != nil {
+		t.Fatalf("parseCLI returned error: %v", err)
+	}
+	if !invocation.Skill.Force {
+		t.Fatal("expected force option to be enabled")
+	}
+}
+
+func TestParseSkillInstallCLIRejectsMissingAgent(t *testing.T) {
+	if _, err := parseCLI([]string{"skill", "install"}); err == nil {
+		t.Fatal("expected missing agent to be rejected")
+	}
+}
+
+func TestParseSkillInstallCLIRejectsUnsupportedAgent(t *testing.T) {
+	if _, err := parseCLI([]string{"skill", "install", "--agent", "cursor"}); err == nil {
+		t.Fatal("expected unsupported agent to be rejected")
+	}
+}
+
+func TestParseSkillInstallCLIRejectsPositionalArguments(t *testing.T) {
+	if _, err := parseCLI([]string{"skill", "install", "--agent", "codex", "extra"}); err == nil {
+		t.Fatal("expected skill install positional arguments to be rejected")
 	}
 }

@@ -69,6 +69,25 @@ type compareImagesArguments struct {
 	Threshold    float64 `json:"threshold,omitempty"`
 }
 
+type semanticDiffArguments struct {
+	CurrentPath        string                     `json:"current_path"`
+	ReferencePath      string                     `json:"reference_path"`
+	Provider           string                     `json:"provider,omitempty"`
+	Model              string                     `json:"model,omitempty"`
+	Mode               pkgwebcap.SemanticDiffMode `json:"mode,omitempty"`
+	Prompt             string                     `json:"prompt,omitempty"`
+	PromptPath         string                     `json:"prompt_path,omitempty"`
+	Focus              []string                   `json:"focus,omitempty"`
+	MetadataPath       string                     `json:"metadata_path,omitempty"`
+	Timeout            string                     `json:"timeout,omitempty"`
+	MaxOutputTokens    int                        `json:"max_output_tokens,omitempty"`
+	PixelDiffImagePath string                     `json:"pixel_diff_image_path,omitempty"`
+	ChangedPixels      int                        `json:"changed_pixels,omitempty"`
+	TotalPixels        int                        `json:"total_pixels,omitempty"`
+	ChangedPercent     float64                    `json:"changed_percent,omitempty"`
+	Threshold          float64                    `json:"threshold,omitempty"`
+}
+
 type captureToolResult struct {
 	OutputPath   string                     `json:"output_path"`
 	MetadataPath string                     `json:"metadata_path,omitempty"`
@@ -101,6 +120,20 @@ type diffToolResult struct {
 	Entry        *pkgwebcap.DiffEntry  `json:"entry,omitempty"`
 	Entries      []pkgwebcap.DiffEntry `json:"entries,omitempty"`
 	CreatedAt    time.Time             `json:"created_at"`
+}
+
+type semanticDiffToolResult struct {
+	CurrentPath     string                         `json:"current_path"`
+	ReferencePath   string                         `json:"reference_path"`
+	Provider        string                         `json:"provider"`
+	Model           string                         `json:"model,omitempty"`
+	Summary         string                         `json:"summary"`
+	Verdict         pkgwebcap.SemanticDiffVerdict  `json:"verdict"`
+	Severity        pkgwebcap.SemanticDiffSeverity `json:"severity"`
+	Differences     []pkgwebcap.SemanticDifference `json:"differences,omitempty"`
+	MetadataPath    string                         `json:"metadata_path,omitempty"`
+	RawResponsePath string                         `json:"raw_response_path,omitempty"`
+	Warnings        []pkgwebcap.CaptureWarning     `json:"warnings,omitempty"`
 }
 
 func (a capturePageArguments) captureRequest() pkgwebcap.CaptureRequest {
@@ -161,6 +194,29 @@ func (a compareImagesArguments) diffRequest() pkgwebcap.DiffRequest {
 	}
 }
 
+func (a semanticDiffArguments) semanticDiffRequest() pkgwebcap.SemanticDiffRequest {
+	return pkgwebcap.SemanticDiffRequest{
+		CurrentPath:     strings.TrimSpace(a.CurrentPath),
+		ReferencePath:   strings.TrimSpace(a.ReferencePath),
+		Provider:        strings.TrimSpace(a.Provider),
+		Model:           strings.TrimSpace(a.Model),
+		Mode:            a.Mode,
+		Prompt:          strings.TrimSpace(a.Prompt),
+		PromptPath:      strings.TrimSpace(a.PromptPath),
+		Focus:           append([]string(nil), a.Focus...),
+		MetadataPath:    strings.TrimSpace(a.MetadataPath),
+		Timeout:         strings.TrimSpace(a.Timeout),
+		MaxOutputTokens: a.MaxOutputTokens,
+		PixelContext: pkgwebcap.SemanticPixelContext{
+			PixelDiffImagePath: strings.TrimSpace(a.PixelDiffImagePath),
+			ChangedPixels:      a.ChangedPixels,
+			TotalPixels:        a.TotalPixels,
+			ChangedPercent:     a.ChangedPercent,
+			Threshold:          a.Threshold,
+		},
+	}
+}
+
 func hasSectionSelectors(selector string, selectors []string, selectorAll string, selectorsAll []string) bool {
 	return strings.TrimSpace(selector) != "" || len(selectors) > 0 || strings.TrimSpace(selectorAll) != "" || len(selectorsAll) > 0
 }
@@ -215,6 +271,22 @@ func summarizeDiffResult(result pkgwebcap.DiffResult) diffToolResult {
 	return summary
 }
 
+func summarizeSemanticDiffResult(result pkgwebcap.SemanticDiffResult) semanticDiffToolResult {
+	return semanticDiffToolResult{
+		CurrentPath:     result.CurrentPath,
+		ReferencePath:   result.ReferencePath,
+		Provider:        result.Provider,
+		Model:           result.Model,
+		Summary:         result.Summary,
+		Verdict:         result.Verdict,
+		Severity:        result.Severity,
+		Differences:     append([]pkgwebcap.SemanticDifference(nil), result.Differences...),
+		MetadataPath:    result.MetadataPath,
+		RawResponsePath: result.RawResponsePath,
+		Warnings:        append([]pkgwebcap.CaptureWarning(nil), result.Warnings...),
+	}
+}
+
 func successToolResult(structured any, text string) callToolResult {
 	return callToolResult{
 		Content: []textContent{
@@ -248,6 +320,7 @@ func (s *Server) tools() []tool {
 		captureSectionTool(captureOutputSchema),
 		captureManifestTool(),
 		compareImagesTool(),
+		semanticDiffTool(),
 	}
 }
 
@@ -275,6 +348,22 @@ func diffToolOutputSchema() map[string]any {
 			"compare_path": map[string]any{"type": "string"},
 		},
 		"required": []string{"mode", "output_path", "base_path", "compare_path"},
+	}
+}
+
+func semanticDiffToolOutputSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"current_path":   map[string]any{"type": "string"},
+			"reference_path": map[string]any{"type": "string"},
+			"provider":       map[string]any{"type": "string"},
+			"summary":        map[string]any{"type": "string"},
+			"verdict":        map[string]any{"type": "string"},
+			"severity":       map[string]any{"type": "string"},
+			"metadata_path":  map[string]any{"type": "string"},
+		},
+		"required": []string{"current_path", "reference_path", "provider", "summary", "verdict", "severity"},
 	}
 }
 
@@ -390,6 +479,38 @@ func compareImagesTool() tool {
 		},
 		OutputSchema: diffToolOutputSchema(),
 		Annotations:  toolAnnotations("Compare Images", false),
+	}
+}
+
+func semanticDiffTool() tool {
+	return tool{
+		Name:        "semantic_diff",
+		Title:       "Semantic Diff",
+		Description: "Compare two screenshots with a configured vision LLM provider and return compact semantic findings.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"current_path":          map[string]any{"type": "string"},
+				"reference_path":        map[string]any{"type": "string"},
+				"provider":              map[string]any{"type": "string"},
+				"model":                 map[string]any{"type": "string"},
+				"mode":                  map[string]any{"type": "string"},
+				"prompt":                map[string]any{"type": "string"},
+				"prompt_path":           map[string]any{"type": "string"},
+				"focus":                 stringArraySchema(),
+				"metadata_path":         map[string]any{"type": "string"},
+				"timeout":               map[string]any{"type": "string"},
+				"max_output_tokens":     map[string]any{"type": "integer"},
+				"pixel_diff_image_path": map[string]any{"type": "string"},
+				"changed_pixels":        map[string]any{"type": "integer"},
+				"total_pixels":          map[string]any{"type": "integer"},
+				"changed_percent":       map[string]any{"type": "number"},
+				"threshold":             map[string]any{"type": "number"},
+			},
+			"required": []string{"current_path", "reference_path", "provider"},
+		},
+		OutputSchema: semanticDiffToolOutputSchema(),
+		Annotations:  toolAnnotations("Semantic Diff", true),
 	}
 }
 

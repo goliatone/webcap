@@ -455,10 +455,10 @@ function install:local {
     }
     _task:log OK "${bin_name} installed to ${install_target}"
 
-    if "${install_target}" --help >/dev/null 2>&1; then
+    if "${install_target}" help >/dev/null 2>&1; then
         _task:log OK "Installation smoke check passed"
     else
-        _task:log WARN "${bin_name} was installed, but ${install_target} failed --help"
+        _task:log WARN "${bin_name} was installed, but ${install_target} failed help"
     fi
 
     resolved_bin="$(command -v "${bin_name}" 2>/dev/null || true)"

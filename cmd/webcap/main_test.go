@@ -17,6 +17,7 @@ import (
 	"strings"
 	"testing"
 
+	pkgwebcap "github.com/goliatone/webcap"
 	"github.com/goliatone/webcap/pkg/version"
 )
 
@@ -229,6 +230,223 @@ func TestRunSkillInstallJSONModePreservesResultShape(t *testing.T) {
 	}
 }
 
+func TestRunSkillInstallJSONConflictWritesStructuredEnvelope(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	args := []string{"skill", "install", "--agent", "codex"}
+	var stdout, stderr bytes.Buffer
+	if code := runCLI(context.Background(), args, strings.NewReader(""), &stdout, &stderr); code != 0 {
+		t.Fatalf("initial install failed with code %d, stderr:\n%s", code, stderr.String())
+	}
+	skillPath := filepath.Join(home, ".agents", "skills", "webcap-agent", "SKILL.md")
+	if err := os.WriteFile(skillPath, []byte("# User edit\n"), 0o644); err != nil {
+		t.Fatalf("write conflicting skill: %v", err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code := runCLI(context.Background(), []string{"skill", "install", "--json", "--agent", "codex"}, strings.NewReader(""), &stdout, &stderr)
+	if code == 0 {
+		t.Fatal("expected conflict to exit non-zero")
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("expected empty stdout, got:\n%s", stdout.String())
+	}
+	var envelope struct {
+		Message   string         `json:"message"`
+		Code      string         `json:"code"`
+		Operation string         `json:"operation"`
+		Metadata  map[string]any `json:"metadata"`
+	}
+	if err := json.Unmarshal(stderr.Bytes(), &envelope); err != nil {
+		t.Fatalf("stderr is not valid JSON: %v\n%s", err, stderr.String())
+	}
+	if envelope.Code != "skill_conflict" || envelope.Operation != "skill_install" || envelope.Metadata["path"] != skillPath {
+		t.Fatalf("unexpected conflict envelope: %#v", envelope)
+	}
+	if !strings.Contains(envelope.Message, "--force") {
+		t.Fatalf("expected conflict message to mention --force, got %#v", envelope)
+	}
+}
+
+func TestRunMultiJSONModePreservesBatchShapeWithFakeService(t *testing.T) {
+	invocation, err := parseCLI([]string{"multi", "--json", "manifest.yaml"})
+	if err != nil {
+		t.Fatalf("parseCLI returned error: %v", err)
+	}
+	fake := &fakeCLIService{
+		batch: pkgwebcap.BatchResult{Results: []pkgwebcap.CaptureResult{{
+			OutputPath:   "shots/home.png",
+			MetadataPath: "shots/home.png.json",
+			ByteSize:     42,
+		}}},
+	}
+	var stdout, stderr bytes.Buffer
+	app := newApp(strings.NewReader(""), &stdout, &stderr)
+	app.loadManifest = func(path string) (pkgwebcap.Manifest, error) {
+		if path != "manifest.yaml" {
+			t.Fatalf("unexpected manifest path: %s", path)
+		}
+		return pkgwebcap.Manifest{}, nil
+	}
+	app.newCaptureService = func(browserOptions, semanticProviderOptions) (cliService, error) {
+		return fake, nil
+	}
+	if err := app.run(context.Background(), invocation); err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+	var decoded struct {
+		Results []struct {
+			OutputPath   string `json:"output_path"`
+			MetadataPath string `json:"metadata_path"`
+			ByteSize     int    `json:"byte_size"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatalf("stdout is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if len(decoded.Results) != 1 || decoded.Results[0].OutputPath != "shots/home.png" || decoded.Results[0].MetadataPath != "shots/home.png.json" || decoded.Results[0].ByteSize != 42 {
+		t.Fatalf("unexpected batch JSON: %#v", decoded)
+	}
+}
+
+func TestRunDiffJSONModePreservesDiffShapeWithFakeService(t *testing.T) {
+	invocation, err := parseCLI([]string{"diff", "--json", "base.png", "current.png"})
+	if err != nil {
+		t.Fatalf("parseCLI returned error: %v", err)
+	}
+	fake := &fakeCLIService{
+		diff: pkgwebcap.DiffResult{
+			Mode:         pkgwebcap.DiffModeImage,
+			OutputPath:   "diffs/home.png",
+			MetadataPath: "diffs/home.png.json",
+			Summary:      pkgwebcap.DiffSummary{ChangedFiles: 1, TotalChangedPixels: 9},
+		},
+	}
+	var stdout, stderr bytes.Buffer
+	app := newApp(strings.NewReader(""), &stdout, &stderr)
+	app.newService = func(semanticProviderOptions) cliService {
+		return fake
+	}
+	if err := app.run(context.Background(), invocation); err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+	var decoded struct {
+		Mode         string `json:"mode"`
+		OutputPath   string `json:"output_path"`
+		MetadataPath string `json:"metadata_path"`
+		Summary      struct {
+			ChangedFiles       int `json:"changed_files"`
+			TotalChangedPixels int `json:"total_changed_pixels"`
+		} `json:"summary"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatalf("stdout is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if decoded.OutputPath != "diffs/home.png" || decoded.MetadataPath != "diffs/home.png.json" || decoded.Summary.ChangedFiles != 1 || decoded.Summary.TotalChangedPixels != 9 {
+		t.Fatalf("unexpected diff JSON: %#v", decoded)
+	}
+}
+
+func TestRunWorkflowRunReportJSONModePreservesShapeWithFakeService(t *testing.T) {
+	invocation, err := parseCLI([]string{"workflow", "capture-scenario", "--json", "--run-report", "workflow.yaml"})
+	if err != nil {
+		t.Fatalf("parseCLI returned error: %v", err)
+	}
+	fake := &fakeCLIService{
+		workflowCapture: pkgwebcap.WorkflowCaptureResult{
+			ScenarioID: "checkout",
+			Results:    []pkgwebcap.WorkflowScreenCaptureResult{{ScreenID: "home", OutputPath: "current/home.png"}},
+		},
+		workflowReport: pkgwebcap.WorkflowReportResult{
+			ScenarioID:   "checkout",
+			ReportPath:   "reports/index.html",
+			MetadataPath: "reports/report.json",
+			Status:       pkgwebcap.WorkflowReviewStatus{Level: "info", Label: "Needs Review"},
+		},
+	}
+	var stdout, stderr bytes.Buffer
+	app := newApp(strings.NewReader(""), &stdout, &stderr)
+	app.loadScenario = func(path string) (pkgwebcap.WorkflowScenario, error) {
+		if path != "workflow.yaml" {
+			t.Fatalf("unexpected scenario path: %s", path)
+		}
+		return pkgwebcap.WorkflowScenario{ID: "checkout"}, nil
+	}
+	app.newScenarioService = func(browserOptions, semanticProviderOptions, pkgwebcap.WorkflowScenario) (cliService, error) {
+		return fake, nil
+	}
+	if err := app.run(context.Background(), invocation); err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+	var decoded struct {
+		Capture struct {
+			ScenarioID string `json:"scenario_id"`
+			Results    []struct {
+				ScreenID string `json:"screen_id"`
+			} `json:"results"`
+		} `json:"capture"`
+		Report struct {
+			ReportPath   string `json:"report_path"`
+			MetadataPath string `json:"metadata_path"`
+			Status       struct {
+				Level string `json:"level"`
+				Label string `json:"label"`
+			} `json:"status"`
+		} `json:"report"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatalf("stdout is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if decoded.Capture.ScenarioID != "checkout" || len(decoded.Capture.Results) != 1 || decoded.Report.ReportPath != "reports/index.html" || decoded.Report.Status.Label != "Needs Review" {
+		t.Fatalf("unexpected workflow run-report JSON: %#v", decoded)
+	}
+}
+
+func TestRunReportJSONModePreservesReportShapeWithFakeService(t *testing.T) {
+	invocation, err := parseCLI([]string{"report", "scenario", "--json", "workflow.yaml"})
+	if err != nil {
+		t.Fatalf("parseCLI returned error: %v", err)
+	}
+	fake := &fakeCLIService{
+		workflowReport: pkgwebcap.WorkflowReportResult{
+			ScenarioID:   "checkout",
+			ReportPath:   "reports/index.html",
+			MetadataPath: "reports/report.json",
+			Status:       pkgwebcap.WorkflowReviewStatus{Level: "success", Label: "Ready"},
+		},
+	}
+	var stdout, stderr bytes.Buffer
+	app := newApp(strings.NewReader(""), &stdout, &stderr)
+	app.loadScenario = func(path string) (pkgwebcap.WorkflowScenario, error) {
+		if path != "workflow.yaml" {
+			t.Fatalf("unexpected scenario path: %s", path)
+		}
+		return pkgwebcap.WorkflowScenario{ID: "checkout"}, nil
+	}
+	app.newService = func(semanticProviderOptions) cliService {
+		return fake
+	}
+	if err := app.run(context.Background(), invocation); err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+	var decoded struct {
+		ScenarioID   string `json:"scenario_id"`
+		ReportPath   string `json:"report_path"`
+		MetadataPath string `json:"metadata_path"`
+		Status       struct {
+			Level string `json:"level"`
+			Label string `json:"label"`
+		} `json:"status"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatalf("stdout is not valid JSON: %v\n%s", err, stdout.String())
+	}
+	if decoded.ScenarioID != "checkout" || decoded.ReportPath != "reports/index.html" || decoded.MetadataPath != "reports/report.json" || decoded.Status.Label != "Ready" {
+		t.Fatalf("unexpected report JSON: %#v", decoded)
+	}
+}
+
 func TestRunCLIJSONParseErrorWritesEnvelopeToStderr(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := runCLI(context.Background(), []string{"shot", "--json"}, strings.NewReader(""), &stdout, &stderr)
@@ -435,4 +653,41 @@ func writeMainFakeCodex(t *testing.T, dir, body string) string {
 		t.Fatalf("write fake codex: %v", err)
 	}
 	return path
+}
+
+type fakeCLIService struct {
+	capture         pkgwebcap.CaptureResult
+	batch           pkgwebcap.BatchResult
+	diff            pkgwebcap.DiffResult
+	semantic        pkgwebcap.SemanticDiffResult
+	workflowCapture pkgwebcap.WorkflowCaptureResult
+	workflowReport  pkgwebcap.WorkflowReportResult
+}
+
+func (f *fakeCLIService) CaptureArtifact(context.Context, pkgwebcap.CaptureRequest) (pkgwebcap.CaptureArtifact, error) {
+	return f.capture.Artifact, nil
+}
+
+func (f *fakeCLIService) Capture(context.Context, pkgwebcap.CaptureRequest) (pkgwebcap.CaptureResult, error) {
+	return f.capture, nil
+}
+
+func (f *fakeCLIService) CaptureBatch(context.Context, pkgwebcap.Manifest, string) (pkgwebcap.BatchResult, error) {
+	return f.batch, nil
+}
+
+func (f *fakeCLIService) Diff(context.Context, pkgwebcap.DiffRequest) (pkgwebcap.DiffResult, error) {
+	return f.diff, nil
+}
+
+func (f *fakeCLIService) SemanticDiff(context.Context, pkgwebcap.SemanticDiffRequest) (pkgwebcap.SemanticDiffResult, error) {
+	return f.semantic, nil
+}
+
+func (f *fakeCLIService) CaptureScenario(context.Context, pkgwebcap.WorkflowScenario) (pkgwebcap.WorkflowCaptureResult, error) {
+	return f.workflowCapture, nil
+}
+
+func (f *fakeCLIService) GenerateWorkflowReport(context.Context, pkgwebcap.WorkflowReportRequest) (pkgwebcap.WorkflowReportResult, error) {
+	return f.workflowReport, nil
 }

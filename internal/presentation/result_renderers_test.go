@@ -66,13 +66,17 @@ func TestHumanWorkflowOutput(t *testing.T) {
 			ScreenID:   "home",
 			Label:      "Home",
 			OutputPath: "current/home.png",
+			MetadataPath: "current/home.png.json",
+			Capture: pkgwebcap.CaptureResult{
+				Warnings: []pkgwebcap.CaptureWarning{{Code: "viewport", Message: "viewport adjusted"}},
+			},
 		}},
 	}
 	var buf bytes.Buffer
 	if err := New(Options{Format: FormatHuman}).Present(&buf, result); err != nil {
 		t.Fatalf("Present returned error: %v", err)
 	}
-	for _, expected := range []string{"Workflow capture complete", "Scenario: checkout", "Captures: 1", "home Home -> current/home.png"} {
+	for _, expected := range []string{"Workflow capture complete", "Scenario: checkout", "Captures: 1", "home Home -> current/home.png", "metadata=current/home.png.json", "1 warnings"} {
 		if !strings.Contains(buf.String(), expected) {
 			t.Fatalf("expected output to contain %q, got:\n%s", expected, buf.String())
 		}

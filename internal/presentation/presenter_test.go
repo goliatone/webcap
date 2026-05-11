@@ -75,6 +75,7 @@ func TestHumanBatchOutputIncludesEachCapture(t *testing.T) {
 		func() pkgwebcap.CaptureResult {
 			item := sampleCaptureResult()
 			item.OutputPath = "shots/about.png"
+			item.MetadataPath = "shots/about.png.json"
 			item.Warnings = nil
 			return item
 		}(),
@@ -83,7 +84,7 @@ func TestHumanBatchOutputIncludesEachCapture(t *testing.T) {
 		t.Fatalf("Present returned error: %v", err)
 	}
 	output := buf.String()
-	for _, expected := range []string{"Captures: 2", "shots/home.png", "shots/about.png"} {
+	for _, expected := range []string{"Captures: 2", "shots/home.png", "metadata=shots/home.png.json", "1 warnings", "shots/about.png", "metadata=shots/about.png.json"} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("expected output to contain %q, got:\n%s", expected, output)
 		}

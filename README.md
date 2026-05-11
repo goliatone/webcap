@@ -44,6 +44,7 @@ webcap skill install --agent codex --force
 
 Result commands render concise human summaries by default. Use `--json` or `--format json` for the machine-readable result structs used by automation and future API responses. Use `--format human` to force human output and `--no-color` for deterministic output in CI, redirected output, and tests.
 `webcap shot <url>` captures the full page by default. Add `--visible` when you only want the current viewport.
+Oversized full-page or selector captures fail early by default with structured limit metadata. Use `--oversize tile` to opt into deterministic tile artifacts, for example `--tile-max-height 4096`; unstitched tiled captures write `<output>.tile-0000.png` style files plus the metadata sidecar. Add `--tile-stitch` when the capture must produce a single image for pixel or semantic comparison.
 
 The standalone CLI does not include application-specific scenario aliases or paths. Provide scenario files explicitly.
 Use `--openai-base-url` or `--anthropic-base-url` with `semantic-diff`, `workflow capture-scenario`, `report scenario`, or `mcp serve` when routing built-in providers through a local fake server, proxy, or compatible gateway.

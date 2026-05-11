@@ -404,7 +404,7 @@ Usage:
 Commands:
   help                         Show this help message.
   version                      Show version and build information.
-  shot                         Capture a single URL.
+  shot                         Capture a single URL. Full-page by default; use --visible for viewport only.
   multi                        Run a YAML or JSON capture manifest.
   diff                         Compare two image artifacts.
   semantic-diff                Compare two image artifacts with a vision LLM provider.

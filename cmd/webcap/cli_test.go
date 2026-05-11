@@ -37,6 +37,36 @@ func TestParseShotCLI(t *testing.T) {
 	if invocation.Output.Format != "human" {
 		t.Fatalf("unexpected default output format: %s", invocation.Output.Format)
 	}
+	if invocation.Shot.Request.FullPage {
+		t.Fatal("expected selector capture to keep selector mode instead of defaulting to full-page")
+	}
+}
+
+func TestParseShotCLIDefaultsPageCaptureToFullPage(t *testing.T) {
+	invocation, err := parseCLI([]string{"shot", "http://localhost:3000"})
+	if err != nil {
+		t.Fatalf("parseCLI returned error: %v", err)
+	}
+	if !invocation.Shot.Request.FullPage {
+		t.Fatal("expected page capture to default to full-page")
+	}
+}
+
+func TestParseShotCLIVisibleCapture(t *testing.T) {
+	invocation, err := parseCLI([]string{"shot", "--visible", "http://localhost:3000"})
+	if err != nil {
+		t.Fatalf("parseCLI returned error: %v", err)
+	}
+	if invocation.Shot.Request.FullPage {
+		t.Fatal("expected --visible to keep viewport capture mode")
+	}
+}
+
+func TestParseShotCLIRejectsVisibleAndFullPage(t *testing.T) {
+	_, err := parseCLI([]string{"shot", "--visible", "--full-page", "http://localhost:3000"})
+	if err == nil {
+		t.Fatal("expected --visible and --full-page conflict")
+	}
 }
 
 func TestParseOutputOptions(t *testing.T) {

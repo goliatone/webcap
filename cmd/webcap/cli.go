@@ -158,6 +158,8 @@ func parseShotCLI(args []string) (cliInvocation, error) {
 		selectorsCSV string
 		selectorsAll string
 		viewport     string
+		fullPage     bool
+		visible      bool
 	)
 
 	invocation := cliInvocation{Command: "shot", Output: defaultOutputOptions()}
@@ -167,7 +169,8 @@ func parseShotCLI(args []string) (cliInvocation, error) {
 	registerBrowserFlags(fs, &invocation.Browser)
 	fs.StringVar(&outputPath, "output", "", "Output image path.")
 	fs.StringVar(&metadataPath, "metadata", "", "Optional metadata sidecar path.")
-	fs.BoolVar(&invocation.Shot.Request.FullPage, "full-page", false, "Capture the full page.")
+	fs.BoolVar(&fullPage, "full-page", false, "Capture the full page. This is the default for page captures.")
+	fs.BoolVar(&visible, "visible", false, "Capture only the visible viewport for page captures.")
 	fs.StringVar(&invocation.Shot.Request.Selector, "selector", "", "Capture the first match for a CSS selector.")
 	fs.StringVar(&selectorsCSV, "selectors", "", "Capture the union of the first match for each comma-separated CSS selector.")
 	fs.StringVar(&invocation.Shot.Request.SelectorAll, "selector-all", "", "Capture the union of all matches for a CSS selector.")
@@ -202,6 +205,16 @@ func parseShotCLI(args []string) (cliInvocation, error) {
 	invocation.Shot.Request.MetadataPath = strings.TrimSpace(metadataPath)
 	invocation.Shot.Request.Selectors = splitCSV(selectorsCSV)
 	invocation.Shot.Request.SelectorsAll = splitCSV(selectorsAll)
+	fullPageSet := flagVisited(fs, "full-page")
+	visibleSet := flagVisited(fs, "visible")
+	if visibleSet && fullPageSet && fullPage {
+		return cliInvocation{}, cliParseError{Message: "shot --visible and --full-page are mutually exclusive", Output: invocation.Output}
+	}
+	if fullPageSet {
+		invocation.Shot.Request.FullPage = fullPage
+	} else if !visible && !hasSelectorTarget(invocation.Shot.Request) {
+		invocation.Shot.Request.FullPage = true
+	}
 
 	parsedViewport, err := parseViewport(viewport)
 	if err != nil {
@@ -574,6 +587,20 @@ func recordVisitedBrowserFlags(fs *flag.FlagSet, browser *browserOptions) {
 			browser.RuntimeDirSet = true
 		}
 	})
+}
+
+func flagVisited(fs *flag.FlagSet, name string) bool {
+	visited := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			visited = true
+		}
+	})
+	return visited
+}
+
+func hasSelectorTarget(req pkgwebcap.CaptureRequest) bool {
+	return req.Selector != "" || len(req.Selectors) > 0 || req.SelectorAll != "" || len(req.SelectorsAll) > 0
 }
 
 func parseViewport(raw string) (pkgwebcap.Viewport, error) {

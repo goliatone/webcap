@@ -310,6 +310,49 @@ func TestRunMultiJSONModePreservesBatchShapeWithFakeService(t *testing.T) {
 	}
 }
 
+func TestRunShotPassesFullPageDefaultToService(t *testing.T) {
+	invocation, err := parseCLI([]string{"shot", "--json", "http://localhost:3000"})
+	if err != nil {
+		t.Fatalf("parseCLI returned error: %v", err)
+	}
+	fake := &fakeCLIService{
+		capture: pkgwebcap.CaptureResult{
+			OutputPath: "shots/home.png",
+			Artifact:   pkgwebcap.CaptureArtifact{Mode: pkgwebcap.CaptureModeFullPage},
+		},
+	}
+	var stdout, stderr bytes.Buffer
+	app := newApp(strings.NewReader(""), &stdout, &stderr)
+	app.newCaptureService = func(browserOptions, semanticProviderOptions) (cliService, error) {
+		return fake, nil
+	}
+	if err := app.run(context.Background(), invocation); err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+	if !fake.lastCaptureRequest.FullPage {
+		t.Fatalf("expected default full-page request, got %#v", fake.lastCaptureRequest)
+	}
+}
+
+func TestRunShotPassesVisibleModeToService(t *testing.T) {
+	invocation, err := parseCLI([]string{"shot", "--json", "--visible", "http://localhost:3000"})
+	if err != nil {
+		t.Fatalf("parseCLI returned error: %v", err)
+	}
+	fake := &fakeCLIService{capture: pkgwebcap.CaptureResult{OutputPath: "shots/home.png"}}
+	var stdout, stderr bytes.Buffer
+	app := newApp(strings.NewReader(""), &stdout, &stderr)
+	app.newCaptureService = func(browserOptions, semanticProviderOptions) (cliService, error) {
+		return fake, nil
+	}
+	if err := app.run(context.Background(), invocation); err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+	if fake.lastCaptureRequest.FullPage {
+		t.Fatalf("expected visible viewport request, got %#v", fake.lastCaptureRequest)
+	}
+}
+
 func TestRunDiffJSONModePreservesDiffShapeWithFakeService(t *testing.T) {
 	invocation, err := parseCLI([]string{"diff", "--json", "base.png", "current.png"})
 	if err != nil {
@@ -656,19 +699,21 @@ func writeMainFakeCodex(t *testing.T, dir, body string) string {
 }
 
 type fakeCLIService struct {
-	capture         pkgwebcap.CaptureResult
-	batch           pkgwebcap.BatchResult
-	diff            pkgwebcap.DiffResult
-	semantic        pkgwebcap.SemanticDiffResult
-	workflowCapture pkgwebcap.WorkflowCaptureResult
-	workflowReport  pkgwebcap.WorkflowReportResult
+	capture            pkgwebcap.CaptureResult
+	batch              pkgwebcap.BatchResult
+	diff               pkgwebcap.DiffResult
+	semantic           pkgwebcap.SemanticDiffResult
+	workflowCapture    pkgwebcap.WorkflowCaptureResult
+	workflowReport     pkgwebcap.WorkflowReportResult
+	lastCaptureRequest pkgwebcap.CaptureRequest
 }
 
 func (f *fakeCLIService) CaptureArtifact(context.Context, pkgwebcap.CaptureRequest) (pkgwebcap.CaptureArtifact, error) {
 	return f.capture.Artifact, nil
 }
 
-func (f *fakeCLIService) Capture(context.Context, pkgwebcap.CaptureRequest) (pkgwebcap.CaptureResult, error) {
+func (f *fakeCLIService) Capture(_ context.Context, req pkgwebcap.CaptureRequest) (pkgwebcap.CaptureResult, error) {
+	f.lastCaptureRequest = req
 	return f.capture, nil
 }
 

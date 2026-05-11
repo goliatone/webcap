@@ -20,25 +20,28 @@ go install github.com/goliatone/webcap/cmd/webcap@latest
 For local development from this checkout:
 
 ```bash
-go run ./cmd/webcap shot http://localhost:3000 --full-page --output shots/home.png
+go run ./cmd/webcap shot --full-page --output shots/home.png http://localhost:3000
 ```
 
 ## CLI
 
 ```bash
 webcap help
-webcap shot http://localhost:3000 --full-page --output shots/home.png
-webcap multi ./shots.yaml --output-dir ./shots
-webcap diff ./baseline.png ./current.png --output ./diff.png
-OPENAI_API_KEY=... webcap semantic-diff ./current.png ./baseline.png --provider openai --model gpt-5.1 --focus "primary CTA,nav labels" --metadata ./semantic.json
-webcap semantic-diff ./current.png ./baseline.png --provider codex-cli --model gpt-5.1 --codex-profile work --metadata ./semantic.json
-webcap workflow capture-scenario ./workflow.yaml --run-report
+webcap shot --full-page --output shots/home.png http://localhost:3000
+webcap shot --json --full-page --output shots/home.png http://localhost:3000
+webcap multi --output-dir ./shots ./shots.yaml
+webcap diff --output ./diff.png ./baseline.png ./current.png
+OPENAI_API_KEY=... webcap semantic-diff --provider openai --model gpt-5.1 --focus "primary CTA,nav labels" --metadata ./semantic.json ./current.png ./baseline.png
+webcap semantic-diff --provider codex-cli --model gpt-5.1 --codex-profile work --metadata ./semantic.json ./current.png ./baseline.png
+webcap workflow capture-scenario --run-report ./workflow.yaml
 webcap report scenario ./workflow.yaml
 webcap mcp serve
 webcap skill install --agent codex
 webcap skill install --agent claude
 webcap skill install --agent codex --force
 ```
+
+Result commands render concise human summaries by default. Use `--json` or `--format json` for the machine-readable result structs used by automation and future API responses. Use `--format human` to force human output and `--no-color` for deterministic output in CI, redirected output, and tests.
 
 The standalone CLI does not include application-specific scenario aliases or paths. Provide scenario files explicitly.
 Use `--openai-base-url` or `--anthropic-base-url` with `semantic-diff`, `workflow capture-scenario`, `report scenario`, or `mcp serve` when routing built-in providers through a local fake server, proxy, or compatible gateway.
@@ -181,5 +184,5 @@ npx playwright install chromium firefox webkit
 Then run with:
 
 ```bash
-webcap shot http://localhost:3000 --engine playwright --playwright-browser chromium
+webcap shot --engine playwright --playwright-browser chromium http://localhost:3000
 ```

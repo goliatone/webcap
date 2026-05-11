@@ -3,6 +3,7 @@ package webcap
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -102,8 +103,18 @@ func (e *ChromiumEngine) Capture(ctx context.Context, req CaptureRequest) (Engin
 	}
 	engineResult.Timing.ReadyAt = e.now()
 
-	payload, bounds, matchCount, err := captureChromiumScreenshot(timeoutCtx, normalized)
+	payload, bounds, matchCount, tiling, err := captureChromiumScreenshot(timeoutCtx, normalized)
 	if err != nil {
+		if tiling != nil {
+			engineResult.Tiling = tiling
+			if bounds != nil {
+				engineResult.Artifact.Bounds = bounds
+				engineResult.Artifact.MatchCount = matchCount
+			}
+			engineResult.Timing.CapturedAt = e.now()
+			engineResult.Timing.TotalDuration = engineResult.Timing.CapturedAt.Sub(captureStartedAt).String()
+			return engineResult, err
+		}
 		return EngineResult{}, err
 	}
 	if bounds != nil {
@@ -112,6 +123,7 @@ func (e *ChromiumEngine) Capture(ctx context.Context, req CaptureRequest) (Engin
 	}
 
 	engineResult.Artifact.Bytes = payload
+	engineResult.Tiling = tiling
 	engineResult.Timing.CapturedAt = e.now()
 	if engineResult.Timing.ReadyAt.IsZero() {
 		engineResult.Timing.ReadyAt = engineResult.Timing.CapturedAt
@@ -261,23 +273,43 @@ func waitForFontsAction(req CaptureRequest, ignored *any) chromedp.Action {
 	)
 }
 
-func captureChromiumScreenshot(ctx context.Context, req CaptureRequest) ([]byte, *Bounds, int, error) {
+func captureChromiumScreenshot(ctx context.Context, req CaptureRequest) ([]byte, *Bounds, int, *CaptureTiling, error) {
 	switch req.Mode() {
 	case CaptureModeFullPage:
-		return captureChromiumFullPage(ctx)
+		return captureChromiumFullPage(ctx, req)
 	case CaptureModeViewport:
-		return captureChromiumViewport(ctx)
+		payload, bounds, matchCount, err := captureChromiumViewport(ctx)
+		return payload, bounds, matchCount, nil, err
 	default:
 		return captureChromiumSelector(ctx, req)
 	}
 }
 
-func captureChromiumFullPage(ctx context.Context) ([]byte, *Bounds, int, error) {
+func captureChromiumFullPage(ctx context.Context, req CaptureRequest) ([]byte, *Bounds, int, *CaptureTiling, error) {
+	target, err := measureChromiumFullPageBounds(ctx)
+	if err != nil {
+		return nil, nil, 0, nil, err
+	}
+	limits := tileLimits(req)
+	if targetExceedsLimits(target, limits) {
+		if effectiveOversizePolicy(req) == OversizePolicyFail {
+			return nil, nil, 0, nil, newOversizeError("capture_full_page", req.Mode(), target, limits, effectiveOversizePolicy(req))
+		}
+		tiling, err := captureChromiumTiles(ctx, req, target)
+		if err != nil {
+			return nil, &target, 0, tiling, err
+		}
+		tiling.Warnings = append(tiling.Warnings, CaptureWarning{
+			Code:    "full_page_tiling",
+			Message: "fixed or sticky elements may repeat across full-page tiles",
+		})
+		return nil, &target, 0, tiling, nil
+	}
 	var payload []byte
 	if err := chromedp.Run(ctx, chromedp.FullScreenshot(&payload, 100)); err != nil {
-		return nil, nil, 0, wrapCaptureError("capture_full_page", err)
+		return nil, nil, 0, nil, wrapCaptureError("capture_full_page", err)
 	}
-	return payload, nil, 0, nil
+	return payload, nil, 0, nil, nil
 }
 
 func captureChromiumViewport(ctx context.Context) ([]byte, *Bounds, int, error) {
@@ -288,17 +320,113 @@ func captureChromiumViewport(ctx context.Context) ([]byte, *Bounds, int, error) 
 	return payload, nil, 0, nil
 }
 
-func captureChromiumSelector(ctx context.Context, req CaptureRequest) ([]byte, *Bounds, int, error) {
+func captureChromiumSelector(ctx context.Context, req CaptureRequest) ([]byte, *Bounds, int, *CaptureTiling, error) {
 	script, err := buildSelectorClipScript(req)
 	if err != nil {
-		return nil, nil, 0, err
+		return nil, nil, 0, nil, err
 	}
 	var clip selectorClip
 	var payload []byte
-	if err := chromedp.Run(ctx, chromedp.Evaluate(script, &clip), captureSelectorClip(req, &clip, &payload)); err != nil {
-		return nil, nil, 0, wrapCaptureError("capture_selector", err)
+	if err := chromedp.Run(ctx, chromedp.Evaluate(script, &clip)); err != nil {
+		return nil, nil, 0, nil, wrapCaptureError("capture_selector", err)
 	}
-	return payload, &Bounds{X: clip.X, Y: clip.Y, Width: clip.Width, Height: clip.Height}, clip.MatchCount, nil
+	target := Bounds{X: clip.X, Y: clip.Y, Width: clip.Width, Height: clip.Height}
+	limits := tileLimits(req)
+	if targetExceedsLimits(normalizeTileTarget(target), limits) {
+		if effectiveOversizePolicy(req) == OversizePolicyFail {
+			return nil, nil, 0, nil, newOversizeError("capture_selector", req.Mode(), normalizeTileTarget(target), limits, effectiveOversizePolicy(req))
+		}
+		tiling, err := captureChromiumTiles(ctx, req, target)
+		if err != nil {
+			return nil, &target, clip.MatchCount, tiling, err
+		}
+		return nil, &target, clip.MatchCount, tiling, nil
+	}
+	if err := chromedp.Run(ctx, captureSelectorClip(req, &clip, &payload)); err != nil {
+		return nil, nil, 0, nil, wrapCaptureError("capture_selector", err)
+	}
+	return payload, &target, clip.MatchCount, nil, nil
+}
+
+func measureChromiumFullPageBounds(ctx context.Context) (Bounds, error) {
+	var bounds Bounds
+	script := `(() => {
+  const doc = document.documentElement;
+  const body = document.body;
+  const width = Math.max(doc ? doc.scrollWidth : 0, body ? body.scrollWidth : 0, window.innerWidth);
+  const height = Math.max(doc ? doc.scrollHeight : 0, body ? body.scrollHeight : 0, window.innerHeight);
+  return { x: 0, y: 0, width, height };
+})()`
+	if err := chromedp.Run(ctx, chromedp.Evaluate(script, &bounds)); err != nil {
+		return Bounds{}, wrapCaptureError("measure_full_page", err)
+	}
+	return normalizeTileTarget(bounds), nil
+}
+
+func captureChromiumTiles(ctx context.Context, req CaptureRequest, target Bounds) (*CaptureTiling, error) {
+	tiling, err := planTiles(target, req.Tile, req.Viewport.ScaleFactor)
+	if err != nil {
+		return nil, err
+	}
+	for idx := range tiling.Tiles {
+		payload, captureErr := captureChromiumTile(ctx, req, tiling.Tiles[idx].SourceBounds)
+		if captureErr != nil {
+			tiling.Tiles[idx].Status = CaptureTileFailed
+			tiling.Tiles[idx].Error = captureErr.Error()
+			tiling.Status = CaptureTilingPartial
+			tiling.FailedCount = 1
+			tiling.TileCount = len(tiling.Tiles)
+			for _, tile := range tiling.Tiles {
+				if tile.Status == CaptureTileCompleted {
+					tiling.CompletedCount++
+				}
+			}
+			return tiling, &PartialCaptureError{
+				Operation:       "capture_tiles",
+				FailedTileIndex: tiling.Tiles[idx].Index,
+				CompletedCount:  tiling.CompletedCount,
+				TotalCount:      len(tiling.Tiles),
+				Err:             captureErr,
+			}
+		}
+		tiling.Tiles[idx].Bytes = payload
+		tiling.Tiles[idx].ByteSize = len(payload)
+		tiling.Tiles[idx].Status = CaptureTileCompleted
+	}
+	tiling.CompletedCount = len(tiling.Tiles)
+	tiling.TileCount = len(tiling.Tiles)
+	tiling.Status = CaptureTilingComplete
+	return tiling, nil
+}
+
+func captureChromiumTile(ctx context.Context, req CaptureRequest, bounds Bounds) ([]byte, error) {
+	var payload []byte
+	err := chromedp.Run(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+		screenshot, err := page.CaptureScreenshot().
+			WithFormat(page.CaptureScreenshotFormatPng).
+			WithCaptureBeyondViewport(true).
+			WithClip(&page.Viewport{
+				X:      bounds.X,
+				Y:      bounds.Y,
+				Width:  bounds.Width,
+				Height: bounds.Height,
+				Scale:  req.Viewport.ScaleFactor,
+			}).
+			Do(ctx)
+		if err != nil {
+			return err
+		}
+		payload = screenshot
+		return nil
+	}))
+	if err != nil {
+		var captureErr *Error
+		if errors.As(err, &captureErr) {
+			return nil, captureErr
+		}
+		return nil, wrapCaptureError("capture_tile", err)
+	}
+	return payload, nil
 }
 
 func captureSelectorClip(req CaptureRequest, clip *selectorClip, payload *[]byte) chromedp.Action {
@@ -308,6 +436,7 @@ func captureSelectorClip(req CaptureRequest, clip *selectorClip, payload *[]byte
 		}
 		screenshot, err := page.CaptureScreenshot().
 			WithFormat(page.CaptureScreenshotFormatPng).
+			WithCaptureBeyondViewport(true).
 			WithClip(&page.Viewport{
 				X:      clip.X,
 				Y:      clip.Y,

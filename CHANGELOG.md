@@ -1,10 +1,24 @@
 # Changelog
 
+# [0.4.0](https://github.com/goliatone/webcap/compare/v0.3.0...v0.4.0) - (2026-05-11)
+
+## <!-- 16 -->➕ Add
+
+- Webcap capture full page ([bb95e60](https://github.com/goliatone/webcap/commit/bb95e60d17e94dc9b424de646666fe237a9729f7))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update readme ([2766afc](https://github.com/goliatone/webcap/commit/2766afcbd74aa3547bff7f44215d49530b111dd2))  - (goliatone)
+
 # [0.3.0](https://github.com/goliatone/webcap/compare/v0.2.0...v0.3.0) - (2026-05-11)
 
 ## <!-- 1 -->🐛 Bug Fixes
 
 - Use help command ([d81e0bf](https://github.com/goliatone/webcap/commit/d81e0bf3eb49d3aed0e560fe0004e0866b0363f1))  - (goliatone)
+
+## <!-- 12 -->🔖 Releases
+
+- V0.3.0 ([385df2c](https://github.com/goliatone/webcap/commit/385df2c5c409ffc02211670fba3b856025a95ac0))  - (goliatone)
 
 ## <!-- 16 -->➕ Add
 

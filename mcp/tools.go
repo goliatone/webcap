@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -9,51 +10,55 @@ import (
 )
 
 type capturePageArguments struct {
-	URL               string                  `json:"url"`
-	OutputPath        string                  `json:"output_path,omitempty"`
-	MetadataPath      string                  `json:"metadata_path,omitempty"`
-	FullPage          bool                    `json:"full_page,omitempty"`
-	Wait              string                  `json:"wait,omitempty"`
-	WaitFor           string                  `json:"wait_for,omitempty"`
-	JavaScript        string                  `json:"javascript,omitempty"`
-	Viewport          pkgwebcap.Viewport      `json:"viewport"`
-	ViewportPreset    string                  `json:"viewport_preset,omitempty"`
-	DevicePreset      string                  `json:"device_preset,omitempty"`
-	UserAgent         string                  `json:"user_agent,omitempty"`
-	Readiness         pkgwebcap.ReadinessMode `json:"readiness,omitempty"`
-	ReadinessIdle     string                  `json:"readiness_idle,omitempty"`
-	DisableAnimations bool                    `json:"disable_animations,omitempty"`
-	ReducedMotion     bool                    `json:"reduced_motion,omitempty"`
-	WaitForFonts      bool                    `json:"wait_for_fonts,omitempty"`
-	Timeout           string                  `json:"timeout,omitempty"`
-	Selector          string                  `json:"selector,omitempty"`
-	Selectors         []string                `json:"selectors,omitempty"`
-	SelectorAll       string                  `json:"selector_all,omitempty"`
-	SelectorsAll      []string                `json:"selectors_all,omitempty"`
+	URL               string                       `json:"url"`
+	OutputPath        string                       `json:"output_path,omitempty"`
+	MetadataPath      string                       `json:"metadata_path,omitempty"`
+	FullPage          bool                         `json:"full_page,omitempty"`
+	Wait              string                       `json:"wait,omitempty"`
+	WaitFor           string                       `json:"wait_for,omitempty"`
+	JavaScript        string                       `json:"javascript,omitempty"`
+	Viewport          pkgwebcap.Viewport           `json:"viewport"`
+	ViewportPreset    string                       `json:"viewport_preset,omitempty"`
+	DevicePreset      string                       `json:"device_preset,omitempty"`
+	UserAgent         string                       `json:"user_agent,omitempty"`
+	Readiness         pkgwebcap.ReadinessMode      `json:"readiness,omitempty"`
+	ReadinessIdle     string                       `json:"readiness_idle,omitempty"`
+	DisableAnimations bool                         `json:"disable_animations,omitempty"`
+	ReducedMotion     bool                         `json:"reduced_motion,omitempty"`
+	WaitForFonts      bool                         `json:"wait_for_fonts,omitempty"`
+	Timeout           string                       `json:"timeout,omitempty"`
+	Selector          string                       `json:"selector,omitempty"`
+	Selectors         []string                     `json:"selectors,omitempty"`
+	SelectorAll       string                       `json:"selector_all,omitempty"`
+	SelectorsAll      []string                     `json:"selectors_all,omitempty"`
+	OversizePolicy    pkgwebcap.OversizePolicy     `json:"oversize_policy,omitempty"`
+	Tile              pkgwebcap.CaptureTileOptions `json:"tile,omitempty"`
 }
 
 type captureSectionArguments struct {
-	URL               string                  `json:"url"`
-	OutputPath        string                  `json:"output_path,omitempty"`
-	MetadataPath      string                  `json:"metadata_path,omitempty"`
-	Selector          string                  `json:"selector,omitempty"`
-	Selectors         []string                `json:"selectors,omitempty"`
-	SelectorAll       string                  `json:"selector_all,omitempty"`
-	SelectorsAll      []string                `json:"selectors_all,omitempty"`
-	Padding           int                     `json:"padding,omitempty"`
-	Wait              string                  `json:"wait,omitempty"`
-	WaitFor           string                  `json:"wait_for,omitempty"`
-	JavaScript        string                  `json:"javascript,omitempty"`
-	Viewport          pkgwebcap.Viewport      `json:"viewport"`
-	ViewportPreset    string                  `json:"viewport_preset,omitempty"`
-	DevicePreset      string                  `json:"device_preset,omitempty"`
-	UserAgent         string                  `json:"user_agent,omitempty"`
-	Readiness         pkgwebcap.ReadinessMode `json:"readiness,omitempty"`
-	ReadinessIdle     string                  `json:"readiness_idle,omitempty"`
-	DisableAnimations bool                    `json:"disable_animations,omitempty"`
-	ReducedMotion     bool                    `json:"reduced_motion,omitempty"`
-	WaitForFonts      bool                    `json:"wait_for_fonts,omitempty"`
-	Timeout           string                  `json:"timeout,omitempty"`
+	URL               string                       `json:"url"`
+	OutputPath        string                       `json:"output_path,omitempty"`
+	MetadataPath      string                       `json:"metadata_path,omitempty"`
+	Selector          string                       `json:"selector,omitempty"`
+	Selectors         []string                     `json:"selectors,omitempty"`
+	SelectorAll       string                       `json:"selector_all,omitempty"`
+	SelectorsAll      []string                     `json:"selectors_all,omitempty"`
+	Padding           int                          `json:"padding,omitempty"`
+	Wait              string                       `json:"wait,omitempty"`
+	WaitFor           string                       `json:"wait_for,omitempty"`
+	JavaScript        string                       `json:"javascript,omitempty"`
+	Viewport          pkgwebcap.Viewport           `json:"viewport"`
+	ViewportPreset    string                       `json:"viewport_preset,omitempty"`
+	DevicePreset      string                       `json:"device_preset,omitempty"`
+	UserAgent         string                       `json:"user_agent,omitempty"`
+	Readiness         pkgwebcap.ReadinessMode      `json:"readiness,omitempty"`
+	ReadinessIdle     string                       `json:"readiness_idle,omitempty"`
+	DisableAnimations bool                         `json:"disable_animations,omitempty"`
+	ReducedMotion     bool                         `json:"reduced_motion,omitempty"`
+	WaitForFonts      bool                         `json:"wait_for_fonts,omitempty"`
+	Timeout           string                       `json:"timeout,omitempty"`
+	OversizePolicy    pkgwebcap.OversizePolicy     `json:"oversize_policy,omitempty"`
+	Tile              pkgwebcap.CaptureTileOptions `json:"tile,omitempty"`
 }
 
 type captureManifestArguments struct {
@@ -102,6 +107,7 @@ type captureToolResult struct {
 	Viewport     pkgwebcap.Viewport         `json:"viewport"`
 	Browser      pkgwebcap.BrowserInfo      `json:"browser"`
 	Warnings     []pkgwebcap.CaptureWarning `json:"warnings,omitempty"`
+	Tiling       *pkgwebcap.CaptureTiling   `json:"tiling,omitempty"`
 }
 
 type batchToolResult struct {
@@ -155,6 +161,8 @@ func (a capturePageArguments) captureRequest() pkgwebcap.CaptureRequest {
 		ReducedMotion:     a.ReducedMotion,
 		WaitForFonts:      a.WaitForFonts,
 		Timeout:           strings.TrimSpace(a.Timeout),
+		OversizePolicy:    a.OversizePolicy,
+		Tile:              a.Tile,
 	}
 }
 
@@ -181,6 +189,8 @@ func (a captureSectionArguments) captureRequest() pkgwebcap.CaptureRequest {
 		ReducedMotion:     a.ReducedMotion,
 		WaitForFonts:      a.WaitForFonts,
 		Timeout:           strings.TrimSpace(a.Timeout),
+		OversizePolicy:    a.OversizePolicy,
+		Tile:              a.Tile,
 	}
 }
 
@@ -236,6 +246,7 @@ func summarizeCaptureResult(result pkgwebcap.CaptureResult) captureToolResult {
 		Viewport:     result.Artifact.Viewport,
 		Browser:      result.Browser,
 		Warnings:     append([]pkgwebcap.CaptureWarning(nil), result.Warnings...),
+		Tiling:       result.Tiling,
 	}
 }
 
@@ -301,15 +312,26 @@ func errorToolResult(toolName string, err error) (callToolResult, error) {
 	if message == "" {
 		message = fmt.Sprintf("%s failed", strings.TrimSpace(toolName))
 	}
+	structured := map[string]any{
+		"tool":    strings.TrimSpace(toolName),
+		"message": message,
+	}
+	var partialErr *pkgwebcap.PartialCaptureError
+	if errors.As(err, &partialErr) {
+		structured["code"] = string(pkgwebcap.CodePartialCapture)
+		structured["failed_tile_index"] = partialErr.FailedTileIndex
+		structured["completed_count"] = partialErr.CompletedCount
+		structured["total_count"] = partialErr.TotalCount
+		if partialErr.Result != nil {
+			structured["result"] = summarizeCaptureResult(*partialErr.Result)
+		}
+	}
 	return callToolResult{
 		Content: []textContent{
 			{Type: "text", Text: message},
 		},
-		StructuredContent: map[string]any{
-			"tool":    strings.TrimSpace(toolName),
-			"message": message,
-		},
-		IsError: true,
+		StructuredContent: structured,
+		IsError:           true,
 	}, nil
 }
 
@@ -333,6 +355,7 @@ func captureToolOutputSchema() map[string]any {
 			"mode":          map[string]any{"type": "string"},
 			"url":           map[string]any{"type": "string"},
 			"engine":        map[string]any{"type": "string"},
+			"tiling":        map[string]any{"type": "object"},
 		},
 		"required": []string{"output_path", "mode", "url", "engine"},
 	}
@@ -392,6 +415,8 @@ func capturePageTool(outputSchema map[string]any) tool {
 				"reduced_motion":     map[string]any{"type": "boolean"},
 				"wait_for_fonts":     map[string]any{"type": "boolean"},
 				"timeout":            map[string]any{"type": "string"},
+				"oversize_policy":    map[string]any{"type": "string", "enum": []string{"fail", "tile"}},
+				"tile":               tileSchema(),
 			},
 			"required": []string{"url"},
 		},
@@ -429,6 +454,8 @@ func captureSectionTool(outputSchema map[string]any) tool {
 				"reduced_motion":     map[string]any{"type": "boolean"},
 				"wait_for_fonts":     map[string]any{"type": "boolean"},
 				"timeout":            map[string]any{"type": "string"},
+				"oversize_policy":    map[string]any{"type": "string", "enum": []string{"fail", "tile"}},
+				"tile":               tileSchema(),
 			},
 			"required": []string{"url"},
 		},
@@ -531,6 +558,22 @@ func viewportSchema() map[string]any {
 			"height":       map[string]any{"type": "integer"},
 			"scale_factor": map[string]any{"type": "number"},
 			"mobile":       map[string]any{"type": "boolean"},
+		},
+	}
+}
+
+func tileSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"max_width":           map[string]any{"type": "integer"},
+			"max_height":          map[string]any{"type": "integer"},
+			"max_pixels":          map[string]any{"type": "integer"},
+			"max_target_pixels":   map[string]any{"type": "integer"},
+			"overlap":             map[string]any{"type": "integer"},
+			"stitch":              map[string]any{"type": "boolean"},
+			"max_stitched_pixels": map[string]any{"type": "integer"},
+			"cleanup_tiles":       map[string]any{"type": "boolean"},
 		},
 	}
 }

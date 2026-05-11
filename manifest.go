@@ -65,6 +65,8 @@ func (m Manifest) Requests(outputDirOverride string) ([]CaptureRequest, error) {
 			ReducedMotion:     shot.ReducedMotion || m.ReducedMotion,
 			WaitForFonts:      shot.WaitForFonts || m.WaitForFonts,
 			Timeout:           firstNonEmpty(shot.Timeout, m.Timeout),
+			OversizePolicy:    firstOversizePolicy(shot.OversizePolicy, m.OversizePolicy),
+			Tile:              mergeTileOptions(m.Tile, shot.Tile),
 		}
 		if shot.Viewport != nil {
 			req.Viewport = *shot.Viewport
@@ -83,6 +85,44 @@ func (m Manifest) Requests(outputDirOverride string) ([]CaptureRequest, error) {
 		requests = append(requests, resolved)
 	}
 	return requests, nil
+}
+
+func firstOversizePolicy(values ...OversizePolicy) OversizePolicy {
+	for _, value := range values {
+		if strings.TrimSpace(string(value)) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func mergeTileOptions(base, override CaptureTileOptions) CaptureTileOptions {
+	out := base
+	if override.fieldSet("max_width") || override.MaxWidth != 0 {
+		out.MaxWidth = override.MaxWidth
+	}
+	if override.fieldSet("max_height") || override.MaxHeight != 0 {
+		out.MaxHeight = override.MaxHeight
+	}
+	if override.fieldSet("max_pixels") || override.MaxPixels != 0 {
+		out.MaxPixels = override.MaxPixels
+	}
+	if override.fieldSet("max_target_pixels") || override.MaxTargetPixels != 0 {
+		out.MaxTargetPixels = override.MaxTargetPixels
+	}
+	if override.fieldSet("overlap") || override.Overlap != 0 {
+		out.Overlap = override.Overlap
+	}
+	if override.fieldSet("stitch") || override.Stitch {
+		out.Stitch = override.Stitch
+	}
+	if override.fieldSet("max_stitched_pixels") || override.MaxStitchedPixels != 0 {
+		out.MaxStitchedPixels = override.MaxStitchedPixels
+	}
+	if override.fieldSet("cleanup_tiles") || override.CleanupTiles {
+		out.CleanupTiles = override.CleanupTiles
+	}
+	return out
 }
 
 func resolveShotOutput(outputDir string, shot ManifestShot) string {

@@ -3,6 +3,7 @@
 Use the CLI as a fallback when MCP tools are not available or when a reproducible command is useful.
 
 Result commands print human summaries by default. Add `--json` or `--format json` when an agent or script needs structured output. Add `--no-color` for deterministic redirected output.
+`webcap shot <url>` captures the full page by default. Add `--visible` only when the current viewport is the intended artifact.
 
 ## Single screenshot
 
@@ -15,6 +16,15 @@ webcap shot \
   --reduced-motion \
   --wait-for-fonts \
   --output artifacts/current/home.png \
+  http://localhost:3000
+```
+
+For a visible viewport only:
+
+```bash
+webcap shot \
+  --visible \
+  --output artifacts/current/home-visible.png \
   http://localhost:3000
 ```
 

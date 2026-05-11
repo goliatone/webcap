@@ -19,7 +19,7 @@ CLI result commands print human summaries by default. Use `--json` or `--format 
 
 For deterministic captures, set a fixed viewport or viewport preset, disable animations, use reduced motion, and wait for fonts. Use `network_idle` readiness only when the page has a stable network boundary; otherwise use selector waits for the UI state that matters.
 
-Use selector capture when the review target is a component or region. Use full-page capture when page structure and scrolling content matter.
+Plain `webcap shot <url>` captures the full page by default. Add `--visible` when the current viewport is the intended artifact. Use selector capture when the review target is a component or region.
 
 ## Artifact conventions
 

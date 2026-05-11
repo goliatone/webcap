@@ -15,9 +15,6 @@ func normalizeWorkflowSemanticDiff(value WorkflowSemanticDiff) (WorkflowSemantic
 	if !isValidSemanticDiffMode(value.Mode) {
 		return WorkflowSemanticDiff{}, newCaptureError(CodeValidation, "normalize_workflow_semantic_diff", fmt.Sprintf("unsupported semantic diff mode %q", value.Mode), nil)
 	}
-	if value.Provider != "" && value.Provider != "openai" && value.Provider != "anthropic" && value.Provider != "codex-cli" {
-		return WorkflowSemanticDiff{}, newCaptureError(CodeValidation, "normalize_workflow_semantic_diff", fmt.Sprintf("unsupported semantic diff provider %q", value.Provider), nil)
-	}
 	value.Run = SemanticDiffRunPolicy(strings.TrimSpace(strings.ToLower(string(value.Run))))
 	switch value.Run {
 	case "", SemanticDiffRunChangedOnly:

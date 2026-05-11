@@ -748,6 +748,64 @@ printf '{"summary":"Workflow codex ok","verdict":"no_meaningful_change","severit
 	}
 }
 
+func TestGenerateWorkflowReportUsesRegisteredLLMSProvider(t *testing.T) {
+	tempDir := t.TempDir()
+	referencePath := filepath.Join(tempDir, "reference.png")
+	currentPath := filepath.Join(tempDir, "artifacts", "current", "patient.png")
+	if err := writeTestPNG(referencePath, []color.NRGBA{{R: 255, G: 255, B: 255, A: 255}}); err != nil {
+		t.Fatalf("write reference: %v", err)
+	}
+	if err := writeTestPNG(currentPath, []color.NRGBA{{R: 200, G: 200, B: 200, A: 255}}); err != nil {
+		t.Fatalf("write current: %v", err)
+	}
+	provider := &recordingLLMSProvider{name: "local-fake", resp: llms.Response{
+		Provider: "local-fake",
+		Model:    "local-model",
+		RawText:  `{"summary":"Workflow local provider ok","verdict":"no_meaningful_change","severity":"info"}`,
+	}}
+	scenario := WorkflowScenario{
+		ID:        "semantic-local-provider-test",
+		SourceDir: tempDir,
+		Environment: WorkflowEnvironment{
+			BaseURL:      "http://localhost:8383",
+			ReportFormat: WorkflowReportFormatHTML,
+		},
+		Artifacts: WorkflowArtifactLayout{
+			Root:       filepath.Join(tempDir, "artifacts"),
+			CurrentDir: filepath.Join(tempDir, "artifacts", "current"),
+			DiffDir:    filepath.Join(tempDir, "artifacts", "diff"),
+			ReportDir:  filepath.Join(tempDir, "artifacts", "report"),
+		},
+		Defaults: WorkflowDefaults{
+			SemanticDiff: WorkflowSemanticDiff{
+				Enabled:  new(true),
+				Provider: "local-fake",
+				Model:    "local-model",
+				Run:      SemanticDiffRunAlways,
+			},
+		},
+		Screens: []WorkflowScreen{{
+			ID:             "patient",
+			Route:          "/triage/patient",
+			OutputName:     "patient",
+			ReferenceImage: referencePath,
+		}},
+	}
+	service := NewServiceWithOptions(nil, Options{SemanticDiff: SemanticDiffOptions{
+		LLMs: llms.Options{Providers: map[string]llms.Provider{"local-fake": provider}},
+	}})
+	result, err := service.GenerateWorkflowReport(context.Background(), WorkflowReportRequest{Scenario: scenario})
+	if err != nil {
+		t.Fatalf("GenerateWorkflowReport returned error: %v", err)
+	}
+	if provider.lastReq.Provider != "local-fake" || provider.lastReq.Model != "local-model" {
+		t.Fatalf("registered LLM provider was not selected: %#v", provider.lastReq)
+	}
+	if result.Entries[0].SemanticDiff == nil || result.Entries[0].SemanticDiff.Summary != "Workflow local provider ok" {
+		t.Fatalf("unexpected semantic result: %#v", result.Entries[0].SemanticDiff)
+	}
+}
+
 func TestWorkflowSemanticDiffChangedOnlySkipsUnchanged(t *testing.T) {
 	tempDir := t.TempDir()
 	referencePath := filepath.Join(tempDir, "reference.png")

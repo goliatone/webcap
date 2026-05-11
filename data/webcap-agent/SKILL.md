@@ -21,6 +21,8 @@ For deterministic captures, set a fixed viewport or viewport preset, disable ani
 
 Plain `webcap shot <url>` captures the full page by default. Add `--visible` when the current viewport is the intended artifact. Use selector capture when the review target is a component or region.
 
+For very tall full-page or selector targets, keep the default fail-fast behavior unless tile artifacts are acceptable. Use `--oversize tile` with explicit tile limits, and add `--tile-stitch` only when downstream comparison needs a single image.
+
 ## Artifact conventions
 
 Keep artifacts grouped by scenario or task:

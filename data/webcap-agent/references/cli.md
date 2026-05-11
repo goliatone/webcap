@@ -38,6 +38,19 @@ webcap shot \
   http://localhost:3000
 ```
 
+For an oversized full-page or selector target, opt into tile artifacts:
+
+```bash
+webcap shot \
+  --selector ".long-table" \
+  --oversize tile \
+  --tile-max-height 4096 \
+  --output artifacts/current/long-table.png \
+  http://localhost:3000
+```
+
+Unstitched tiled captures write deterministic tile files and metadata. Add `--tile-stitch` only when a single image is needed for pixel or semantic comparison.
+
 ## Manifest capture
 
 ```bash

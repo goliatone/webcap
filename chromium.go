@@ -251,6 +251,9 @@ func (e *ChromiumEngine) waitForReadiness(ctx context.Context, req CaptureReques
 	if req.WaitFor != "" {
 		actions = append(actions, chromedp.WaitVisible(req.WaitFor, chromedp.ByQuery))
 	}
+	if req.WaitForFunction != "" {
+		actions = append(actions, waitForFunctionAction(req, &ignored))
+	}
 	if req.WaitDuration() > 0 {
 		actions = append(actions, chromedp.Sleep(req.WaitDuration()))
 	}
@@ -271,6 +274,98 @@ func waitForFontsAction(req CaptureRequest, ignored *any) chromedp.Action {
 		chromedp.WithPollingInterval(100*time.Millisecond),
 		chromedp.WithPollingTimeout(req.TimeoutDuration()),
 	)
+}
+
+func waitForFunctionAction(req CaptureRequest, ignored *any) chromedp.Action {
+	return chromedp.ActionFunc(func(ctx context.Context) error {
+		script, buildErr := buildWaitForFunctionScript(req.WaitForFunction, waitForFunctionTimeout(ctx, req.TimeoutDuration()))
+		if buildErr != nil {
+			return buildErr
+		}
+		err := chromedp.Evaluate(script, ignored).Do(ctx)
+		if err != nil {
+			return waitForFunctionError(err)
+		}
+		return nil
+	})
+}
+
+func buildWaitForFunctionScript(source string, timeout time.Duration) (string, error) {
+	encodedSource, err := json.Marshal(source)
+	if err != nil {
+		return "", wrapCaptureError("wait_ready", err)
+	}
+	timeoutMs := timeout.Milliseconds()
+	if timeoutMs < 1 {
+		timeoutMs = 1
+	}
+	return fmt.Sprintf(`(async () => {
+  const source = %s;
+  const timeoutMs = %d;
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      throw new Error("wait_for_function did not become truthy before timeout");
+    }
+    try {
+      let value = (0, eval)("(" + String(source) + ")");
+      if (typeof value === "function") {
+        value = value();
+      }
+      if (value && typeof value.then === "function") {
+        const settled = await Promise.race([
+          Promise.resolve(value).then((resolved) => ({ resolved })),
+          new Promise((resolve) => setTimeout(() => resolve({ timedOut: true }), Math.max(1, remaining))),
+        ]);
+        if (settled.timedOut) {
+          throw new Error("wait_for_function did not become truthy before timeout");
+        }
+        value = settled.resolved;
+      }
+      if (value) {
+        return true;
+      }
+    } catch (err) {
+      if (String(err && err.message || "").includes("wait_for_function did not become truthy before timeout")) {
+        throw err;
+      }
+      throw new Error("wait_for_function predicate failed");
+    }
+    await new Promise((resolve) => setTimeout(resolve, Math.min(100, Math.max(1, deadline - Date.now()))));
+  }
+})()`, encodedSource, timeoutMs), nil
+}
+
+func waitForFunctionTimeout(ctx context.Context, configured time.Duration) time.Duration {
+	timeout := configured
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if timeout <= 0 || remaining < timeout {
+			timeout = remaining
+		}
+	}
+	if timeout > 50*time.Millisecond {
+		timeout -= 50 * time.Millisecond
+	}
+	if timeout < time.Millisecond {
+		return time.Millisecond
+	}
+	return timeout
+}
+
+func waitForFunctionError(err error) error {
+	if err == nil {
+		return nil
+	}
+	message := "wait_for_function predicate failed"
+	code := CodeCapture
+	lower := strings.ToLower(err.Error())
+	if errors.Is(err, context.DeadlineExceeded) || strings.Contains(lower, "timeout") || strings.Contains(lower, "deadline") {
+		message = "wait_for_function did not become truthy before timeout"
+		code = CodeTimeout
+	}
+	return newCaptureError(code, "wait_ready", message, err).WithMetadata("wait", "wait_for_function")
 }
 
 func captureChromiumScreenshot(ctx context.Context, req CaptureRequest) ([]byte, *Bounds, int, *CaptureTiling, error) {

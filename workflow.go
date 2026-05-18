@@ -468,6 +468,9 @@ func applyWorkflowCaptureDefaults(request *CaptureRequest, defaults WorkflowDefa
 	if request.WaitFor == "" {
 		request.WaitFor = defaults.WaitFor
 	}
+	if request.WaitForFunction == "" {
+		request.WaitForFunction = defaults.WaitForFunction
+	}
 	if request.OversizePolicy == "" {
 		request.OversizePolicy = defaults.OversizePolicy
 	}

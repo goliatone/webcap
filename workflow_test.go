@@ -1124,6 +1124,24 @@ func TestWorkflowSemanticDiffPolicyCanEscalate(t *testing.T) {
 	}
 }
 
+func TestApplyWorkflowCaptureDefaultsWaitForFunction(t *testing.T) {
+	req := CaptureRequest{}
+	applyWorkflowCaptureDefaults(&req, WorkflowDefaults{
+		WaitForFunction: "window.defaultReady",
+	})
+	if req.WaitForFunction != "window.defaultReady" {
+		t.Fatalf("expected workflow default wait_for_function, got %q", req.WaitForFunction)
+	}
+
+	req = CaptureRequest{WaitForFunction: "window.screenReady"}
+	applyWorkflowCaptureDefaults(&req, WorkflowDefaults{
+		WaitForFunction: "window.defaultReady",
+	})
+	if req.WaitForFunction != "window.screenReady" {
+		t.Fatalf("screen wait_for_function should override default, got %q", req.WaitForFunction)
+	}
+}
+
 func TestGenerateWorkflowReportRendersMultiScreenStoryComparison(t *testing.T) {
 	tempDir := t.TempDir()
 	patientReferencePath := filepath.Join(tempDir, "patient-reference.png")

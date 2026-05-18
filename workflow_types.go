@@ -103,9 +103,10 @@ type WorkflowDefaults struct {
 	Timeout           string               `json:"timeout,omitempty" yaml:"timeout,omitempty"`
 	Wait              string               `json:"wait,omitempty" yaml:"wait,omitempty"`
 	WaitFor           string               `json:"wait_for,omitempty" yaml:"wait_for,omitempty"`
+	WaitForFunction   string               `json:"wait_for_function,omitempty" yaml:"wait_for_function,omitempty"`
 	FullPage          *bool                `json:"full_page,omitempty" yaml:"full_page,omitempty"`
 	OversizePolicy    OversizePolicy       `json:"oversize_policy,omitempty" yaml:"oversize_policy,omitempty"`
-	Tile              CaptureTileOptions   `json:"tile,omitempty,omitzero" yaml:"tile,omitempty"`
+	Tile              CaptureTileOptions   `json:"tile,omitzero" yaml:"tile,omitempty"`
 }
 
 type WorkflowHooks struct {

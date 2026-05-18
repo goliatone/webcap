@@ -46,6 +46,24 @@ Result commands render concise human summaries by default. Use `--json` or `--fo
 `webcap shot <url>` captures the full page by default. Add `--visible` when you only want the current viewport.
 Oversized full-page or selector captures fail early by default with structured limit metadata. Use `--oversize tile` to opt into deterministic tile artifacts, for example `--tile-max-height 4096`; unstitched tiled captures write `<output>.tile-0000.png` style files plus the metadata sidecar. Add `--tile-stitch` when the capture must produce a single image for pixel or semantic comparison.
 
+Browser readiness modes such as `complete` and `network_idle` do not always mean the app UI is ready. Use selector waits for visible DOM targets, or `--wait-for-function` when readiness is best expressed as JavaScript:
+
+```bash
+webcap shot \
+  --wait-for-function 'window.__webcapReady === true' \
+  --output shots/home.png \
+  http://localhost:3000
+```
+
+For important visual review flows, prefer stable app-owned markers such as `data-webcap-ready="true"`. For Storybook iframe captures, wait for the preview to show the story and for the root to contain rendered content:
+
+```bash
+webcap shot \
+  --wait-for-function 'document.body.classList.contains("sb-show-main") && !document.querySelector(".sb-preparing,.sb-errordisplay") && document.querySelector("#storybook-root")?.children.length > 0' \
+  --output shots/story.png \
+  http://localhost:6006/iframe.html?id=components-button--primary
+```
+
 The standalone CLI does not include application-specific scenario aliases or paths. Provide scenario files explicitly.
 Use `--openai-base-url` or `--anthropic-base-url` with `semantic-diff`, `workflow capture-scenario`, `report scenario`, or `mcp serve` when routing built-in providers through a local fake server, proxy, or compatible gateway.
 Use `--codex-bin`, `--codex-profile`, `--codex-oss`, `--codex-local-provider`, and repeated `--codex-extra-arg` flags to configure the local Codex CLI process. CLI providers reuse local tool configuration and may still use subscriptions, API accounts, or local model resources.
@@ -65,9 +83,10 @@ if err != nil {
 
 service := webcap.NewService(engine)
 result, err := service.Capture(ctx, webcap.CaptureRequest{
-    URL:        "http://localhost:3000",
-    FullPage:   true,
-    OutputPath: "shots/home.png",
+    URL:             "http://localhost:3000",
+    FullPage:        true,
+    WaitForFunction: `document.querySelector("[data-webcap-ready=true]") !== null`,
+    OutputPath:      "shots/home.png",
 })
 ```
 

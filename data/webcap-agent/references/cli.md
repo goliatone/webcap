@@ -38,6 +38,24 @@ webcap shot \
   http://localhost:3000
 ```
 
+For app-owned readiness:
+
+```bash
+webcap shot \
+  --wait-for-function 'window.__webcapReady === true' \
+  --output artifacts/current/home.png \
+  http://localhost:3000
+```
+
+For a Storybook iframe:
+
+```bash
+webcap shot \
+  --wait-for-function 'document.body.classList.contains("sb-show-main") && !document.querySelector(".sb-preparing,.sb-errordisplay") && document.querySelector("#storybook-root")?.children.length > 0' \
+  --output artifacts/current/button-primary.png \
+  'http://localhost:6006/iframe.html?id=components-button--primary'
+```
+
 For an oversized full-page or selector target, opt into tile artifacts:
 
 ```bash

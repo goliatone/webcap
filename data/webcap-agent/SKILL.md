@@ -17,7 +17,9 @@ CLI result commands print human summaries by default. Use `--json` or `--format 
 
 ## Capture defaults
 
-For deterministic captures, set a fixed viewport or viewport preset, disable animations, use reduced motion, and wait for fonts. Use `network_idle` readiness only when the page has a stable network boundary; otherwise use selector waits for the UI state that matters.
+For deterministic captures, set a fixed viewport or viewport preset, disable animations, use reduced motion, and wait for fonts. Use `network_idle` readiness only when the page has a stable network boundary; otherwise use selector waits or `wait_for_function` predicate waits for the UI state that matters.
+
+Use `wait_for_function` through MCP `capture_page` and `capture_section` arguments, or `--wait-for-function` in the CLI, when app readiness depends on client state that is not captured by navigation readiness. Prefer stable app-owned markers such as `data-webcap-ready` over fixed sleeps.
 
 Plain `webcap shot <url>` captures the full page by default. Add `--visible` when the current viewport is the intended artifact. Use selector capture when the review target is a component or region.
 

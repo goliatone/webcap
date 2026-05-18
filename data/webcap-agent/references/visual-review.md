@@ -10,8 +10,10 @@ When `webcap` MCP tools are available, call them directly for capture, diff, sem
 - Disable CSS animations and transitions.
 - Emulate reduced motion when animation is not under review.
 - Wait for fonts before capture.
-- Prefer selector waits over arbitrary sleep.
+- Prefer selector waits or `wait_for_function` predicate waits over arbitrary sleep.
 - Use `network_idle` only for pages that stop background polling.
+
+Use `wait_for_function` for app-rendered state such as hydrated dashboards, Storybook iframes, and route-level data loading. MCP `capture_page` and `capture_section` accept `wait_for_function`; the CLI flag is `--wait-for-function`.
 
 ## Selector strategy
 

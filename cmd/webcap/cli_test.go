@@ -14,6 +14,7 @@ func TestParseShotCLI(t *testing.T) {
 		"--selectors", ".hero,.cta",
 		"--output", "shots/home.png",
 		"--viewport", "1600x900",
+		"--wait-for-function", "window.__webcapReady === true",
 		"http://localhost:3000",
 	})
 	if err != nil {
@@ -33,6 +34,9 @@ func TestParseShotCLI(t *testing.T) {
 	}
 	if invocation.Shot.Request.Readiness != pkgwebcap.ReadinessComplete {
 		t.Fatalf("unexpected readiness: %s", invocation.Shot.Request.Readiness)
+	}
+	if invocation.Shot.Request.WaitForFunction != "window.__webcapReady === true" {
+		t.Fatalf("unexpected wait_for_function: %s", invocation.Shot.Request.WaitForFunction)
 	}
 	if invocation.Output.Format != "human" {
 		t.Fatalf("unexpected default output format: %s", invocation.Output.Format)

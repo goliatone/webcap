@@ -178,6 +178,7 @@ func parseShotCLI(args []string) (cliInvocation, error) {
 	fs.IntVar(&invocation.Shot.Request.Padding, "padding", 0, "Add padding around selector captures.")
 	fs.StringVar(&invocation.Shot.Request.Wait, "wait", "", "Extra wait duration such as 250ms or 2s.")
 	fs.StringVar(&invocation.Shot.Request.WaitFor, "wait-for", "", "Wait for a selector to become visible before capture.")
+	fs.StringVar(&invocation.Shot.Request.WaitForFunction, "wait-for-function", "", "Wait for a JavaScript predicate to become truthy before capture.")
 	fs.StringVar(&invocation.Shot.Request.JavaScript, "javascript", "", "Run JavaScript before capture.")
 	fs.StringVar(&invocation.Shot.Request.Timeout, "timeout", "", "Overall capture timeout such as 30s.")
 	fs.StringVar((*string)(&invocation.Shot.Request.OversizePolicy), "oversize", "", "Oversize policy: fail or tile.")

@@ -100,6 +100,18 @@ func TestSessionToolsList(t *testing.T) {
 	if len(result.Tools) != 5 {
 		t.Fatalf("expected 5 tools, got %d", len(result.Tools))
 	}
+	for _, tool := range result.Tools {
+		if tool.Name != "capture_page" && tool.Name != "capture_section" {
+			continue
+		}
+		properties, ok := tool.InputSchema["properties"].(map[string]any)
+		if !ok {
+			t.Fatalf("%s properties schema missing", tool.Name)
+		}
+		if _, ok := properties["wait_for_function"]; !ok {
+			t.Fatalf("%s schema missing wait_for_function", tool.Name)
+		}
+	}
 }
 
 func TestCaptureSectionValidationError(t *testing.T) {
@@ -144,12 +156,41 @@ func TestCapturePageAcceptsTileOptions(t *testing.T) {
 	session := server.NewSession()
 	initializeSession(t, session)
 
-	resp := session.handle(context.Background(), []byte(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"capture_page","arguments":{"url":"http://localhost:3000","oversize_policy":"tile","tile":{"max_width":4096,"stitch":true}}}}`))
+	resp := session.handle(context.Background(), []byte(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"capture_page","arguments":{"url":"http://localhost:3000","wait_for_function":" window.__webcapReady ","oversize_policy":"tile","tile":{"max_width":4096,"stitch":true}}}}`))
 	if resp == nil || resp.Error != nil {
 		t.Fatalf("tools/call returned protocol error: %#v", resp)
 	}
 	if capture.lastCapture.OversizePolicy != pkgwebcap.OversizePolicyTile || capture.lastCapture.Tile.MaxWidth != 4096 || !capture.lastCapture.Tile.Stitch {
 		t.Fatalf("tile options were not forwarded: %+v", capture.lastCapture)
+	}
+	if capture.lastCapture.WaitForFunction != "window.__webcapReady" {
+		t.Fatalf("wait_for_function was not forwarded: %+v", capture.lastCapture)
+	}
+}
+
+func TestCaptureSectionForwardsWaitForFunction(t *testing.T) {
+	capture := &fakeCaptureService{captureResult: sampleCaptureResult("/tmp/out.png")}
+	server, err := NewServer(Config{
+		Name:    "webcap",
+		Version: "0.1.0",
+		Capture: capture,
+		Diff:    &fakeDiffService{result: sampleDiffResult()},
+		LoadManifest: func(string) (pkgwebcap.Manifest, error) {
+			return pkgwebcap.Manifest{}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewServer returned error: %v", err)
+	}
+	session := server.NewSession()
+	initializeSession(t, session)
+
+	resp := session.handle(context.Background(), []byte(`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"capture_section","arguments":{"url":"http://localhost:3000","selector":"#app","wait_for_function":"() => window.__webcapReady"}}}`))
+	if resp == nil || resp.Error != nil {
+		t.Fatalf("tools/call returned protocol error: %#v", resp)
+	}
+	if capture.lastCapture.WaitForFunction != "() => window.__webcapReady" {
+		t.Fatalf("wait_for_function was not forwarded: %+v", capture.lastCapture)
 	}
 }
 

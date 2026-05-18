@@ -16,6 +16,7 @@ type capturePageArguments struct {
 	FullPage          bool                         `json:"full_page,omitempty"`
 	Wait              string                       `json:"wait,omitempty"`
 	WaitFor           string                       `json:"wait_for,omitempty"`
+	WaitForFunction   string                       `json:"wait_for_function,omitempty"`
 	JavaScript        string                       `json:"javascript,omitempty"`
 	Viewport          pkgwebcap.Viewport           `json:"viewport"`
 	ViewportPreset    string                       `json:"viewport_preset,omitempty"`
@@ -32,7 +33,7 @@ type capturePageArguments struct {
 	SelectorAll       string                       `json:"selector_all,omitempty"`
 	SelectorsAll      []string                     `json:"selectors_all,omitempty"`
 	OversizePolicy    pkgwebcap.OversizePolicy     `json:"oversize_policy,omitempty"`
-	Tile              pkgwebcap.CaptureTileOptions `json:"tile,omitempty"`
+	Tile              pkgwebcap.CaptureTileOptions `json:"tile"`
 }
 
 type captureSectionArguments struct {
@@ -46,6 +47,7 @@ type captureSectionArguments struct {
 	Padding           int                          `json:"padding,omitempty"`
 	Wait              string                       `json:"wait,omitempty"`
 	WaitFor           string                       `json:"wait_for,omitempty"`
+	WaitForFunction   string                       `json:"wait_for_function,omitempty"`
 	JavaScript        string                       `json:"javascript,omitempty"`
 	Viewport          pkgwebcap.Viewport           `json:"viewport"`
 	ViewportPreset    string                       `json:"viewport_preset,omitempty"`
@@ -58,7 +60,7 @@ type captureSectionArguments struct {
 	WaitForFonts      bool                         `json:"wait_for_fonts,omitempty"`
 	Timeout           string                       `json:"timeout,omitempty"`
 	OversizePolicy    pkgwebcap.OversizePolicy     `json:"oversize_policy,omitempty"`
-	Tile              pkgwebcap.CaptureTileOptions `json:"tile,omitempty"`
+	Tile              pkgwebcap.CaptureTileOptions `json:"tile"`
 }
 
 type captureManifestArguments struct {
@@ -150,6 +152,7 @@ func (a capturePageArguments) captureRequest() pkgwebcap.CaptureRequest {
 		FullPage:          a.FullPage,
 		Wait:              strings.TrimSpace(a.Wait),
 		WaitFor:           strings.TrimSpace(a.WaitFor),
+		WaitForFunction:   strings.TrimSpace(a.WaitForFunction),
 		JavaScript:        strings.TrimSpace(a.JavaScript),
 		Viewport:          a.Viewport,
 		ViewportPreset:    strings.TrimSpace(a.ViewportPreset),
@@ -178,6 +181,7 @@ func (a captureSectionArguments) captureRequest() pkgwebcap.CaptureRequest {
 		Padding:           a.Padding,
 		Wait:              strings.TrimSpace(a.Wait),
 		WaitFor:           strings.TrimSpace(a.WaitFor),
+		WaitForFunction:   strings.TrimSpace(a.WaitForFunction),
 		JavaScript:        strings.TrimSpace(a.JavaScript),
 		Viewport:          a.Viewport,
 		ViewportPreset:    strings.TrimSpace(a.ViewportPreset),
@@ -404,6 +408,7 @@ func capturePageTool(outputSchema map[string]any) tool {
 				"full_page":          map[string]any{"type": "boolean"},
 				"wait":               map[string]any{"type": "string"},
 				"wait_for":           map[string]any{"type": "string"},
+				"wait_for_function":  map[string]any{"type": "string"},
 				"javascript":         map[string]any{"type": "string"},
 				"viewport":           viewportSchema(),
 				"viewport_preset":    map[string]any{"type": "string"},
@@ -443,6 +448,7 @@ func captureSectionTool(outputSchema map[string]any) tool {
 				"padding":            map[string]any{"type": "integer"},
 				"wait":               map[string]any{"type": "string"},
 				"wait_for":           map[string]any{"type": "string"},
+				"wait_for_function":  map[string]any{"type": "string"},
 				"javascript":         map[string]any{"type": "string"},
 				"viewport":           viewportSchema(),
 				"viewport_preset":    map[string]any{"type": "string"},

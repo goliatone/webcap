@@ -13,7 +13,8 @@ func TestManifestRequestsApplyDefaults(t *testing.T) {
 			Width:  1600,
 			Height: 900,
 		},
-		Wait: "250ms",
+		Wait:            "250ms",
+		WaitForFunction: "window.defaultReady",
 		Shots: []ManifestShot{
 			{
 				ID:       "home",
@@ -37,11 +38,34 @@ func TestManifestRequestsApplyDefaults(t *testing.T) {
 	if req.Wait != "250ms" {
 		t.Fatalf("unexpected wait: %s", req.Wait)
 	}
+	if req.WaitForFunction != "window.defaultReady" {
+		t.Fatalf("unexpected wait_for_function: %s", req.WaitForFunction)
+	}
 	if req.Viewport.Width != 1600 || req.Viewport.Height != 900 {
 		t.Fatalf("unexpected viewport: %+v", req.Viewport)
 	}
 	if req.Readiness != defaultReadinessMode {
 		t.Fatalf("unexpected readiness: %s", req.Readiness)
+	}
+}
+
+func TestManifestRequestsWaitForFunctionShotOverridesDefault(t *testing.T) {
+	manifest := Manifest{
+		WaitForFunction: "window.defaultReady",
+		Shots: []ManifestShot{
+			{
+				URL:             "http://localhost:3000",
+				WaitForFunction: "window.shotReady",
+			},
+		},
+	}
+
+	requests, err := manifest.Requests("")
+	if err != nil {
+		t.Fatalf("Requests returned error: %v", err)
+	}
+	if requests[0].WaitForFunction != "window.shotReady" {
+		t.Fatalf("unexpected wait_for_function: %s", requests[0].WaitForFunction)
 	}
 }
 

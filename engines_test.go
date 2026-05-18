@@ -3,9 +3,12 @@ package webcap
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -36,7 +39,13 @@ func TestPlaywrightEngineCaptureBridge(t *testing.T) {
 	}
 	dir := t.TempDir()
 	scriptPath := filepath.Join(dir, "capture.mjs")
-	script := `process.stdout.write(JSON.stringify({
+	script := `const chunks = [];
+for await (const chunk of process.stdin) chunks.push(chunk);
+const payload = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+if (payload.request.wait_for_function !== "window.__webcapReady") {
+  throw new Error("missing wait_for_function");
+}
+process.stdout.write(JSON.stringify({
   artifact: {
     image_format: "png",
     mode: "viewport",
@@ -69,7 +78,8 @@ func TestPlaywrightEngineCaptureBridge(t *testing.T) {
 		t.Fatalf("NewPlaywrightEngine returned error: %v", err)
 	}
 	result, err := engine.Capture(context.Background(), CaptureRequest{
-		URL: "http://localhost:3000",
+		URL:             "http://localhost:3000",
+		WaitForFunction: "window.__webcapReady",
 	})
 	if err != nil {
 		t.Fatalf("Capture returned error: %v", err)
@@ -79,6 +89,39 @@ func TestPlaywrightEngineCaptureBridge(t *testing.T) {
 	}
 	if result.Browser.Engine != "playwright" {
 		t.Fatalf("unexpected browser engine: %s", result.Browser.Engine)
+	}
+}
+
+func TestPlaywrightCaptureErrorMapping(t *testing.T) {
+	err := playwrightCaptureError(`{"message":"wait_for_function did not become truthy before timeout","code":"timeout_error","operation":"wait_ready","metadata":{"wait":"wait_for_function"}}`, errors.New("exit status 1"))
+	var captureErr *Error
+	if !errors.As(err, &captureErr) {
+		t.Fatalf("expected structured timeout error, got %T", err)
+	}
+	if captureErr.Code != CodeTimeout || captureErr.Operation != "wait_ready" || captureErr.Metadata["wait"] != "wait_for_function" {
+		t.Fatalf("unexpected timeout error: %+v", captureErr)
+	}
+	if strings.Contains(captureErr.Message, "__distinctiveNeverReady") {
+		t.Fatalf("timeout message leaked predicate source: %q", captureErr.Message)
+	}
+
+	err = playwrightCaptureError(`{"message":"wait_for_function predicate failed","code":"capture_error","operation":"wait_ready","metadata":{"wait":"wait_for_function"}}`, errors.New("exit status 1"))
+	if !errors.As(err, &captureErr) {
+		t.Fatalf("expected structured predicate error, got %T", err)
+	}
+	if captureErr.Code != CodeCapture || captureErr.Operation != "wait_ready" || captureErr.Metadata["wait"] != "wait_for_function" {
+		t.Fatalf("unexpected predicate error: %+v", captureErr)
+	}
+	if strings.Contains(captureErr.Message, "distinctive thrown predicate source") {
+		t.Fatalf("predicate error message leaked predicate source: %q", captureErr.Message)
+	}
+
+	err = playwrightCaptureError("Error: wait_for_function predicate failed", errors.New("exit status 1"))
+	if !errors.As(err, &captureErr) {
+		t.Fatalf("expected generic playwright error, got %T", err)
+	}
+	if captureErr.Operation != "playwright_capture" || captureErr.Metadata["wait"] == "wait_for_function" {
+		t.Fatalf("unstructured output should not be classified as wait_for_function: %+v", captureErr)
 	}
 }
 
@@ -103,5 +146,112 @@ func TestPlaywrightEngineRejectsTiledCapture(t *testing.T) {
 	}
 	if captureErr.Code != CodeUnsupported || captureErr.Metadata["engine"] != "playwright" {
 		t.Fatalf("unexpected unsupported error: %+v", captureErr)
+	}
+}
+
+func TestChromiumWaitForFunctionPredicateForms(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte(`<!doctype html><html><body><div id="app">loading</div><script>
+window.__webcapReady = false;
+setTimeout(() => {
+  window.__webcapReady = true;
+  document.getElementById("app").textContent = "ready";
+}, 50);
+</script></body></html>`))
+	}))
+	defer server.Close()
+
+	tests := []struct {
+		name      string
+		predicate string
+	}{
+		{name: "expression", predicate: `window.__webcapReady === true`},
+		{name: "callable", predicate: `() => window.__webcapReady === true`},
+		{name: "async callable", predicate: `async () => window.__webcapReady === true`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			engine := NewChromiumEngine(ChromiumOptions{Headless: true})
+			_, err := engine.Capture(context.Background(), CaptureRequest{
+				URL:             server.URL,
+				WaitForFunction: tt.predicate,
+				JavaScript:      `if (!window.__webcapReady) throw new Error("not ready after wait_for_function")`,
+				Timeout:         "5s",
+			})
+			if err != nil {
+				skipIfChromiumUnavailable(t, err)
+				t.Fatalf("Capture returned error: %v", err)
+			}
+		})
+	}
+}
+
+func TestChromiumWaitForFunctionFailuresAreStructuredAndRedacted(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte(`<!doctype html><html><body>ready</body></html>`))
+	}))
+	defer server.Close()
+
+	engine := NewChromiumEngine(ChromiumOptions{Headless: true})
+	_, err := engine.Capture(context.Background(), CaptureRequest{
+		URL:             server.URL,
+		WaitForFunction: `window.__distinctiveNeverReadyPredicate === true`,
+		Timeout:         "250ms",
+	})
+	if err != nil {
+		skipIfChromiumUnavailable(t, err)
+	}
+	var captureErr *Error
+	if !errors.As(err, &captureErr) {
+		t.Fatalf("expected structured timeout error, got %T", err)
+	}
+	if captureErr.Code != CodeTimeout || captureErr.Operation != "wait_ready" || captureErr.Metadata["wait"] != "wait_for_function" {
+		t.Fatalf("unexpected timeout error: %+v", captureErr)
+	}
+	if strings.Contains(captureErr.Message, "__distinctiveNeverReadyPredicate") {
+		t.Fatalf("timeout message leaked predicate source: %q", captureErr.Message)
+	}
+
+	_, err = engine.Capture(context.Background(), CaptureRequest{
+		URL:             server.URL,
+		WaitForFunction: `() => { throw new Error("distinctive thrown predicate source") }`,
+		Timeout:         "5s",
+	})
+	if err != nil {
+		skipIfChromiumUnavailable(t, err)
+	}
+	if !errors.As(err, &captureErr) {
+		t.Fatalf("expected structured thrown predicate error, got %T", err)
+	}
+	if captureErr.Code != CodeCapture || captureErr.Operation != "wait_ready" || captureErr.Metadata["wait"] != "wait_for_function" {
+		t.Fatalf("unexpected predicate error: %+v", captureErr)
+	}
+	if strings.Contains(captureErr.Message, "distinctive thrown predicate source") {
+		t.Fatalf("predicate error message leaked predicate source: %q", captureErr.Message)
+	}
+
+	_, err = engine.Capture(context.Background(), CaptureRequest{
+		URL:             server.URL,
+		WaitForFunction: `async () => new Promise(() => {})`,
+		Timeout:         "3s",
+	})
+	if err != nil {
+		skipIfChromiumUnavailable(t, err)
+	}
+	if !errors.As(err, &captureErr) {
+		t.Fatalf("expected structured pending predicate timeout, got %T", err)
+	}
+	if captureErr.Code != CodeTimeout || captureErr.Operation != "wait_ready" || captureErr.Metadata["wait"] != "wait_for_function" {
+		t.Fatalf("unexpected pending predicate timeout: %+v", captureErr)
+	}
+}
+
+func skipIfChromiumUnavailable(t *testing.T, err error) {
+	t.Helper()
+	var captureErr *Error
+	if errors.As(err, &captureErr) && captureErr.Code == CodeBrowserStartup {
+		t.Skipf("chromium unavailable: %v", err)
 	}
 }

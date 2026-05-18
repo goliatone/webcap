@@ -56,6 +56,7 @@ func (m Manifest) Requests(outputDirOverride string) ([]CaptureRequest, error) {
 			Padding:           shot.Padding,
 			Wait:              firstNonEmpty(shot.Wait, m.Wait),
 			WaitFor:           firstNonEmpty(shot.WaitFor, m.WaitFor),
+			WaitForFunction:   firstNonEmpty(shot.WaitForFunction, m.WaitForFunction),
 			JavaScript:        shot.JavaScript,
 			ViewportPreset:    firstNonEmpty(shot.ViewportPreset, m.ViewportPreset),
 			DevicePreset:      firstNonEmpty(shot.DevicePreset, m.DevicePreset),

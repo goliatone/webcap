@@ -60,6 +60,30 @@ func TestNormalizeCaptureRequestRejectsInvalidTileOptions(t *testing.T) {
 	}
 }
 
+func TestNormalizeCaptureRequestTrimsWaitForFunction(t *testing.T) {
+	req, err := NormalizeCaptureRequest(CaptureRequest{
+		URL:             "http://localhost:3000",
+		WaitForFunction: "  () => window.__webcapReady  ",
+	})
+	if err != nil {
+		t.Fatalf("NormalizeCaptureRequest returned error: %v", err)
+	}
+	if req.WaitForFunction != "() => window.__webcapReady" {
+		t.Fatalf("unexpected wait_for_function: %q", req.WaitForFunction)
+	}
+
+	req, err = NormalizeCaptureRequest(CaptureRequest{
+		URL:             "http://localhost:3000",
+		WaitForFunction: " \t\n ",
+	})
+	if err != nil {
+		t.Fatalf("NormalizeCaptureRequest returned error: %v", err)
+	}
+	if req.WaitForFunction != "" {
+		t.Fatalf("expected empty wait_for_function, got %q", req.WaitForFunction)
+	}
+}
+
 func TestPartialCaptureErrorCarriesPersistedResult(t *testing.T) {
 	partial := (&PartialCaptureError{
 		Operation:       "capture_tiles",

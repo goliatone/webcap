@@ -57,6 +57,7 @@ type CaptureRequest struct {
 	Padding           int                `json:"padding,omitempty" yaml:"padding,omitempty"`
 	Wait              string             `json:"wait,omitempty" yaml:"wait,omitempty"`
 	WaitFor           string             `json:"wait_for,omitempty" yaml:"wait_for,omitempty"`
+	WaitForFunction   string             `json:"wait_for_function,omitempty" yaml:"wait_for_function,omitempty"`
 	JavaScript        string             `json:"javascript,omitempty" yaml:"javascript,omitempty"`
 	Viewport          Viewport           `json:"viewport" yaml:"viewport,omitempty"`
 	ViewportPreset    string             `json:"viewport_preset,omitempty" yaml:"viewport_preset,omitempty"`
@@ -72,7 +73,7 @@ type CaptureRequest struct {
 	BeforeCaptureJS   string             `json:"before_capture_js,omitempty" yaml:"before_capture_js,omitempty"`
 	Timeout           string             `json:"timeout,omitempty" yaml:"timeout,omitempty"`
 	OversizePolicy    OversizePolicy     `json:"oversize_policy,omitempty" yaml:"oversize_policy,omitempty"`
-	Tile              CaptureTileOptions `json:"tile,omitempty,omitzero" yaml:"tile,omitempty"`
+	Tile              CaptureTileOptions `json:"tile,omitzero" yaml:"tile,omitempty"`
 }
 
 type OversizePolicy string
@@ -330,6 +331,7 @@ type Manifest struct {
 	DevicePreset      string             `json:"device_preset,omitempty" yaml:"device_preset,omitempty"`
 	Wait              string             `json:"wait,omitempty" yaml:"wait,omitempty"`
 	WaitFor           string             `json:"wait_for,omitempty" yaml:"wait_for,omitempty"`
+	WaitForFunction   string             `json:"wait_for_function,omitempty" yaml:"wait_for_function,omitempty"`
 	Readiness         ReadinessMode      `json:"readiness,omitempty" yaml:"readiness,omitempty"`
 	ReadinessIdle     string             `json:"readiness_idle,omitempty" yaml:"readiness_idle,omitempty"`
 	DisableAnimations bool               `json:"disable_animations,omitempty" yaml:"disable_animations,omitempty"`
@@ -337,7 +339,7 @@ type Manifest struct {
 	WaitForFonts      bool               `json:"wait_for_fonts,omitempty" yaml:"wait_for_fonts,omitempty"`
 	Timeout           string             `json:"timeout,omitempty" yaml:"timeout,omitempty"`
 	OversizePolicy    OversizePolicy     `json:"oversize_policy,omitempty" yaml:"oversize_policy,omitempty"`
-	Tile              CaptureTileOptions `json:"tile,omitempty,omitzero" yaml:"tile,omitempty"`
+	Tile              CaptureTileOptions `json:"tile,omitzero" yaml:"tile,omitempty"`
 	Shots             []ManifestShot     `json:"shots" yaml:"shots"`
 }
 
@@ -354,6 +356,7 @@ type ManifestShot struct {
 	Padding           int                `json:"padding,omitempty" yaml:"padding,omitempty"`
 	Wait              string             `json:"wait,omitempty" yaml:"wait,omitempty"`
 	WaitFor           string             `json:"wait_for,omitempty" yaml:"wait_for,omitempty"`
+	WaitForFunction   string             `json:"wait_for_function,omitempty" yaml:"wait_for_function,omitempty"`
 	JavaScript        string             `json:"javascript,omitempty" yaml:"javascript,omitempty"`
 	Viewport          *Viewport          `json:"viewport,omitempty" yaml:"viewport,omitempty"`
 	ViewportPreset    string             `json:"viewport_preset,omitempty" yaml:"viewport_preset,omitempty"`
@@ -365,7 +368,7 @@ type ManifestShot struct {
 	WaitForFonts      bool               `json:"wait_for_fonts,omitempty" yaml:"wait_for_fonts,omitempty"`
 	Timeout           string             `json:"timeout,omitempty" yaml:"timeout,omitempty"`
 	OversizePolicy    OversizePolicy     `json:"oversize_policy,omitempty" yaml:"oversize_policy,omitempty"`
-	Tile              CaptureTileOptions `json:"tile,omitempty,omitzero" yaml:"tile,omitempty"`
+	Tile              CaptureTileOptions `json:"tile,omitzero" yaml:"tile,omitempty"`
 }
 
 type EngineResult struct {
@@ -407,6 +410,7 @@ func trimCaptureRequest(req CaptureRequest) CaptureRequest {
 	req.SelectorAll = strings.TrimSpace(req.SelectorAll)
 	req.Wait = strings.TrimSpace(req.Wait)
 	req.WaitFor = strings.TrimSpace(req.WaitFor)
+	req.WaitForFunction = strings.TrimSpace(req.WaitForFunction)
 	req.JavaScript = strings.TrimSpace(req.JavaScript)
 	req.BeforeNavigateJS = strings.TrimSpace(req.BeforeNavigateJS)
 	req.AfterNavigateJS = strings.TrimSpace(req.AfterNavigateJS)

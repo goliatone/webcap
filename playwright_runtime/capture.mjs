@@ -113,6 +113,10 @@ try {
     });
   }
 
+  if (request.wait_for_function) {
+    await waitForUserFunction(page, request.wait_for_function, timeoutMs);
+  }
+
   if (waitMs > 0) {
     await page.waitForTimeout(waitMs);
   }
@@ -252,6 +256,9 @@ try {
       bytes_base64: Buffer.from(bytes).toString("base64"),
     })
   );
+} catch (err) {
+  process.stderr.write(JSON.stringify(errorEnvelopeFrom(err)));
+  process.exitCode = 1;
 } finally {
   if (context) await context.close();
   await browser.close();
@@ -298,6 +305,80 @@ async function applyReadiness(page, readiness, timeoutMs, idleMs) {
     default:
       await page.waitForLoadState("load", { timeout: timeoutMs });
   }
+}
+
+async function waitForUserFunction(page, source, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      throw captureError("timeout_error", "wait_ready", "wait_for_function did not become truthy before timeout", {
+        wait: "wait_for_function",
+      });
+    }
+    try {
+      const ready = await page.evaluate(async ({ predicateSource, evalTimeoutMs }) => {
+        try {
+          let value = (0, eval)(`(${String(predicateSource)})`);
+          if (typeof value === "function") {
+            value = value();
+          }
+          if (value && typeof value.then === "function") {
+            const settled = await Promise.race([
+              Promise.resolve(value).then((resolved) => ({ resolved })),
+              new Promise((resolve) => setTimeout(() => resolve({ timedOut: true }), evalTimeoutMs)),
+            ]);
+            if (settled.timedOut) {
+              return false;
+            }
+            value = settled.resolved;
+          }
+          return !!value;
+        } catch {
+          throw new Error("wait_for_function predicate failed");
+        }
+      }, { predicateSource: String(source), evalTimeoutMs: Math.max(1, remaining) });
+      if (ready) {
+        return;
+      }
+    } catch (err) {
+      if (err?.webcap) {
+        throw err;
+      }
+      const message = String(err?.message || "");
+      if (message.includes("wait_for_function predicate failed")) {
+        throw captureError("capture_error", "wait_ready", "wait_for_function predicate failed", {
+          wait: "wait_for_function",
+        });
+      }
+      throw err;
+    }
+
+    await page.waitForTimeout(Math.min(100, Math.max(1, deadline - Date.now())));
+  }
+}
+
+function captureError(code, operation, message, metadata = undefined) {
+  const err = new Error(message);
+  err.webcap = {
+    code,
+    operation,
+    message,
+    metadata,
+  };
+  return err;
+}
+
+function errorEnvelopeFrom(err) {
+  if (err?.webcap) {
+    return err.webcap;
+  }
+  const message = String(err?.message || err || "playwright capture failed").trim() || "playwright capture failed";
+  return {
+    code: "capture_error",
+    operation: "playwright_capture",
+    message,
+  };
 }
 
 function targetSelectors(request) {

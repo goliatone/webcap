@@ -11,6 +11,7 @@ import (
 	"github.com/chromedp/cdproto/browser"
 	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/cdproto/page"
+	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 )
 
@@ -282,7 +283,9 @@ func waitForFunctionAction(req CaptureRequest, ignored *any) chromedp.Action {
 		if buildErr != nil {
 			return buildErr
 		}
-		err := chromedp.Evaluate(script, ignored).Do(ctx)
+		err := chromedp.Evaluate(script, ignored, func(p *runtime.EvaluateParams) *runtime.EvaluateParams {
+			return p.WithAwaitPromise(true)
+		}).Do(ctx)
 		if err != nil {
 			return waitForFunctionError(err)
 		}

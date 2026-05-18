@@ -75,39 +75,56 @@ func ErrorEnvelopeFrom(err error) ErrorEnvelope {
 func writeHumanError(w io.Writer, err error) error {
 	var partialErr *pkgwebcap.PartialCaptureError
 	if errors.As(err, &partialErr) {
-		if _, writeErr := fmt.Fprintf(w, "Error: %s\n", strings.TrimSpace(fmt.Sprint(err))); writeErr != nil {
-			return writeErr
-		}
-		if _, writeErr := fmt.Fprintf(w, "Failed tile: %d\n", partialErr.FailedTileIndex); writeErr != nil {
-			return writeErr
-		}
-		if _, writeErr := fmt.Fprintf(w, "Tiles: %d/%d completed\n", partialErr.CompletedCount, partialErr.TotalCount); writeErr != nil {
-			return writeErr
-		}
-		if partialErr.Result != nil {
-			if partialErr.Result.MetadataPath != "" {
-				if _, writeErr := fmt.Fprintf(w, "Metadata: %s\n", partialErr.Result.MetadataPath); writeErr != nil {
-					return writeErr
-				}
-			}
-			if partialErr.Result.Tiling != nil {
-				if partialErr.Result.Tiling.Status != "" {
-					if _, writeErr := fmt.Fprintf(w, "Tiling: %s\n", partialErr.Result.Tiling.Status); writeErr != nil {
-						return writeErr
-					}
-				}
-				for _, tile := range partialErr.Result.Tiling.Tiles {
-					if tile.Status == pkgwebcap.CaptureTileCompleted && tile.OutputPath != "" {
-						if _, writeErr := fmt.Fprintf(w, "First tile: %s\n", tile.OutputPath); writeErr != nil {
-							return writeErr
-						}
-						break
-					}
-				}
-			}
-		}
-		return nil
+		return writePartialCaptureError(w, err, partialErr)
 	}
 	_, writeErr := fmt.Fprintf(w, "Error: %s\n", strings.TrimSpace(fmt.Sprint(err)))
 	return writeErr
+}
+
+func writePartialCaptureError(w io.Writer, err error, partialErr *pkgwebcap.PartialCaptureError) error {
+	if _, writeErr := fmt.Fprintf(w, "Error: %s\n", strings.TrimSpace(fmt.Sprint(err))); writeErr != nil {
+		return writeErr
+	}
+	if _, writeErr := fmt.Fprintf(w, "Failed tile: %d\n", partialErr.FailedTileIndex); writeErr != nil {
+		return writeErr
+	}
+	if _, writeErr := fmt.Fprintf(w, "Tiles: %d/%d completed\n", partialErr.CompletedCount, partialErr.TotalCount); writeErr != nil {
+		return writeErr
+	}
+	if partialErr.Result == nil {
+		return nil
+	}
+	return writePartialCaptureResult(w, *partialErr.Result)
+}
+
+func writePartialCaptureResult(w io.Writer, result pkgwebcap.CaptureResult) error {
+	if result.MetadataPath != "" {
+		if _, writeErr := fmt.Fprintf(w, "Metadata: %s\n", result.MetadataPath); writeErr != nil {
+			return writeErr
+		}
+	}
+	return writePartialCaptureTiling(w, result.Tiling)
+}
+
+func writePartialCaptureTiling(w io.Writer, tiling *pkgwebcap.CaptureTiling) error {
+	if tiling == nil {
+		return nil
+	}
+	if tiling.Status != "" {
+		if _, writeErr := fmt.Fprintf(w, "Tiling: %s\n", tiling.Status); writeErr != nil {
+			return writeErr
+		}
+	}
+	return writeFirstCompletedTile(w, tiling.Tiles)
+}
+
+func writeFirstCompletedTile(w io.Writer, tiles []pkgwebcap.CaptureTile) error {
+	for _, tile := range tiles {
+		if tile.Status != pkgwebcap.CaptureTileCompleted || tile.OutputPath == "" {
+			continue
+		}
+		_, writeErr := fmt.Fprintf(w, "First tile: %s\n", tile.OutputPath)
+		return writeErr
+	}
+	return nil
 }

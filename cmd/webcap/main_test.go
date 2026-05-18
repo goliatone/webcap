@@ -41,6 +41,7 @@ func TestRunHelpCLI(t *testing.T) {
 		"webcap shot [flags] <url>",
 		"webcap mcp serve [flags]",
 		"webcap skill install [flags] --agent <codex|claude>",
+		"--wait-for-function",
 	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("expected help output to contain %q, got:\n%s", expected, output)

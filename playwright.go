@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -106,11 +107,16 @@ func (e *PlaywrightEngine) Capture(ctx context.Context, req CaptureRequest) (Eng
 		return EngineResult{}, wrapCaptureError("playwright_marshal_request", err)
 	}
 
-	cmd := exec.CommandContext(ctx, e.opts.NodeBinary, e.opts.ScriptPath)
+	cmdCtx, cancel := context.WithTimeout(ctx, normalized.TimeoutDuration())
+	defer cancel()
+	cmd := exec.CommandContext(cmdCtx, e.opts.NodeBinary, e.opts.ScriptPath)
 	cmd.Dir = e.opts.RuntimeDir
 	cmd.Stdin = strings.NewReader(string(encoded))
 	output, err := cmd.CombinedOutput()
 	if err != nil {
+		if errors.Is(cmdCtx.Err(), context.DeadlineExceeded) {
+			return EngineResult{}, playwrightCaptureTimeoutError(normalized, err)
+		}
 		return EngineResult{}, playwrightCaptureError(strings.TrimSpace(string(output)), err)
 	}
 
@@ -129,6 +135,14 @@ func (e *PlaywrightEngine) Capture(ctx context.Context, req CaptureRequest) (Eng
 		Timing:   response.Timing,
 		Warnings: cloneWarnings(response.Warnings),
 	}, nil
+}
+
+func playwrightCaptureTimeoutError(req CaptureRequest, err error) error {
+	if strings.TrimSpace(req.WaitForFunction) != "" {
+		return newCaptureError(CodeTimeout, "wait_ready", "wait_for_function did not become truthy before timeout", err).
+			WithMetadata("wait", "wait_for_function")
+	}
+	return newCaptureError(CodeTimeout, "playwright_capture", "capture timed out", err)
 }
 
 func playwrightCaptureError(output string, err error) error {

@@ -125,6 +125,119 @@ func TestPlaywrightCaptureErrorMapping(t *testing.T) {
 	}
 }
 
+func TestPlaywrightRuntimeWaitForFunctionPredicateForms(t *testing.T) {
+	engine := newTestPlaywrightRuntimeEngine(t)
+	tests := []struct {
+		name      string
+		predicate string
+	}{
+		{name: "expression", predicate: `window.__webcapReady === true`},
+		{name: "callable", predicate: `() => window.__webcapReady === true`},
+		{name: "async callable", predicate: `async () => window.__webcapReady === true`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := engine.Capture(context.Background(), CaptureRequest{
+				URL:             delayedReadyDataURL(),
+				WaitForFunction: tt.predicate,
+				JavaScript:      `if (!window.__webcapReady) throw new Error("not ready after wait_for_function")`,
+				Timeout:         "5s",
+			})
+			if err != nil {
+				skipIfPlaywrightRuntimeUnavailable(t, err)
+				t.Fatalf("Capture returned error: %v", err)
+			}
+		})
+	}
+}
+
+func TestPlaywrightRuntimeWaitForFunctionFailuresAreStructured(t *testing.T) {
+	engine := newTestPlaywrightRuntimeEngine(t)
+	tests := []struct {
+		name      string
+		predicate string
+		wantCode  ErrorCode
+	}{
+		{name: "pending promise", predicate: `async () => new Promise(() => {})`, wantCode: CodeTimeout},
+		{name: "sync hang", predicate: `() => { while (true) {} }`, wantCode: CodeTimeout},
+		{name: "throws", predicate: `() => { throw new Error("distinctive thrown predicate source") }`, wantCode: CodeCapture},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := engine.Capture(context.Background(), CaptureRequest{
+				URL:             `data:text/html,<!doctype html><html><body>ready</body></html>`,
+				WaitForFunction: tt.predicate,
+				Timeout:         "1500ms",
+			})
+			if err != nil {
+				skipIfPlaywrightRuntimeUnavailable(t, err)
+			}
+			var captureErr *Error
+			if !errors.As(err, &captureErr) {
+				t.Fatalf("expected structured error, got %T", err)
+			}
+			if captureErr.Code != tt.wantCode || captureErr.Operation != "wait_ready" || captureErr.Metadata["wait"] != "wait_for_function" {
+				t.Fatalf("unexpected wait_for_function error: %+v", captureErr)
+			}
+			if strings.Contains(captureErr.Message, "distinctive thrown predicate source") {
+				t.Fatalf("predicate source leaked into message: %q", captureErr.Message)
+			}
+		})
+	}
+}
+
+func TestPlaywrightRuntimeWaitForFunctionModule(t *testing.T) {
+	nodeBinary, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not available")
+	}
+	cmd := exec.Command(nodeBinary, "--test", "playwright_runtime/wait_for_function.test.mjs")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("node runtime tests failed: %v\n%s", err, output)
+	}
+}
+
+func TestPlaywrightEngineHardTimeoutClassifiesWaitForFunction(t *testing.T) {
+	nodeBinary, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not available")
+	}
+	dir := t.TempDir()
+	scriptPath := filepath.Join(dir, "capture.mjs")
+	script := `setInterval(() => {}, 1000);`
+	if writeErr := os.WriteFile(scriptPath, []byte(script), 0o644); writeErr != nil {
+		t.Fatalf("WriteFile returned error: %v", writeErr)
+	}
+
+	engine, err := NewPlaywrightEngine(PlaywrightOptions{
+		NodeBinary: nodeBinary,
+		RuntimeDir: dir,
+		ScriptPath: scriptPath,
+	})
+	if err != nil {
+		t.Fatalf("NewPlaywrightEngine returned error: %v", err)
+	}
+	_, err = engine.Capture(context.Background(), CaptureRequest{
+		URL:             "http://localhost:3000",
+		WaitForFunction: "() => { while (true) {} }",
+		Timeout:         "25ms",
+	})
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	var captureErr *Error
+	if !errors.As(err, &captureErr) {
+		t.Fatalf("expected structured timeout error, got %T", err)
+	}
+	if captureErr.Code != CodeTimeout || captureErr.Operation != "wait_ready" || captureErr.Metadata["wait"] != "wait_for_function" {
+		t.Fatalf("unexpected timeout error: %+v", captureErr)
+	}
+	if strings.Contains(captureErr.Message, "while (true)") {
+		t.Fatalf("timeout message leaked predicate source: %q", captureErr.Message)
+	}
+}
+
 func TestPlaywrightEngineRejectsTiledCapture(t *testing.T) {
 	engine, err := NewPlaywrightEngine(PlaywrightOptions{
 		NodeBinary: "node",
@@ -146,6 +259,40 @@ func TestPlaywrightEngineRejectsTiledCapture(t *testing.T) {
 	}
 	if captureErr.Code != CodeUnsupported || captureErr.Metadata["engine"] != "playwright" {
 		t.Fatalf("unexpected unsupported error: %+v", captureErr)
+	}
+}
+
+func newTestPlaywrightRuntimeEngine(t *testing.T) *PlaywrightEngine {
+	t.Helper()
+	nodeBinary, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not available")
+	}
+	runtimeDir := DefaultPlaywrightRuntimeDir()
+	if _, err := os.Stat(filepath.Join(runtimeDir, "node_modules", "playwright")); err != nil {
+		t.Skip("playwright runtime dependencies not installed")
+	}
+	engine, err := NewPlaywrightEngine(PlaywrightOptions{
+		NodeBinary: nodeBinary,
+		RuntimeDir: runtimeDir,
+		Headless:   true,
+	})
+	if err != nil {
+		t.Fatalf("NewPlaywrightEngine returned error: %v", err)
+	}
+	return engine
+}
+
+func skipIfPlaywrightRuntimeUnavailable(t *testing.T, err error) {
+	t.Helper()
+	if err == nil {
+		return
+	}
+	message := strings.ToLower(err.Error())
+	if strings.Contains(message, "executable doesn't exist") ||
+		strings.Contains(message, "please run") ||
+		strings.Contains(message, "browserType.launch") {
+		t.Skipf("playwright browser unavailable: %v", err)
 	}
 }
 
@@ -185,6 +332,10 @@ setTimeout(() => {
 			}
 		})
 	}
+}
+
+func delayedReadyDataURL() string {
+	return `data:text/html,%3C%21doctype%20html%3E%3Chtml%3E%3Cbody%3E%3Cdiv%20id%3D%22app%22%3Eloading%3C%2Fdiv%3E%3Cscript%3Ewindow.__webcapReady%3Dfalse%3BsetTimeout%28%28%29%3D%3E%7Bwindow.__webcapReady%3Dtrue%3Bdocument.getElementById%28%22app%22%29.textContent%3D%22ready%22%3B%7D%2C50%29%3B%3C%2Fscript%3E%3C%2Fbody%3E%3C%2Fhtml%3E`
 }
 
 func TestChromiumWaitForFunctionFailuresAreStructuredAndRedacted(t *testing.T) {

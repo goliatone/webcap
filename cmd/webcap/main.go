@@ -437,6 +437,12 @@ Tiled capture flags for shot:
   --tile-max-stitched-pixels   Maximum stitched output pixels in device pixels.
   --tile-cleanup               Delete generated tile files after stitched output succeeds.
 
+Readiness flags for shot:
+  --wait-for                   Wait for a selector to become visible before capture.
+  --wait-for-function          Wait for a JavaScript predicate to become truthy before capture.
+  --wait                       Extra wait duration after readiness, such as 250ms or 2s.
+  --wait-for-fonts             Wait for document fonts to finish loading before capture.
+
 Semantic provider flags:
   --openai-base-url            Override the OpenAI semantic provider endpoint.
   --anthropic-base-url         Override the Anthropic semantic provider endpoint.

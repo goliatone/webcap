@@ -17,35 +17,7 @@ func writeWorkflowCapture(w io.Writer, result pkgwebcap.WorkflowCaptureResult) e
 	); err != nil {
 		return err
 	}
-	if len(result.Results) > 0 {
-		if _, err := fmt.Fprintln(w, "Screens:"); err != nil {
-			return err
-		}
-		for _, screen := range result.Results {
-			if _, err := fmt.Fprintf(w, "  - %s %s -> %s", screen.ScreenID, screen.Label, screen.OutputPath); err != nil {
-				return err
-			}
-			if metadataPath := firstNonEmpty(screen.MetadataPath, screen.Capture.MetadataPath); metadataPath != "" {
-				if _, err := fmt.Fprintf(w, " metadata=%s", metadataPath); err != nil {
-					return err
-				}
-			}
-			if len(screen.Capture.Warnings) > 0 {
-				if _, err := fmt.Fprintf(w, " (%d warnings)", len(screen.Capture.Warnings)); err != nil {
-					return err
-				}
-			}
-			if screen.Capture.Tiling != nil {
-				if _, err := fmt.Fprintf(w, " tiled=%s tiles=%d/%d", screen.Capture.Tiling.Status, screen.Capture.Tiling.CompletedCount, screen.Capture.Tiling.TileCount); err != nil {
-					return err
-				}
-			}
-			if _, err := fmt.Fprintln(w); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+	return writeWorkflowScreens(w, result.Results)
 }
 
 func writeWorkflowReport(w io.Writer, result pkgwebcap.WorkflowReportResult) error {
@@ -91,4 +63,61 @@ func workflowAttentionCount(entries []pkgwebcap.WorkflowReportEntry) int {
 		}
 	}
 	return count
+}
+
+func writeWorkflowScreens(w io.Writer, screens []pkgwebcap.WorkflowScreenCaptureResult) error {
+	if len(screens) == 0 {
+		return nil
+	}
+	if _, err := fmt.Fprintln(w, "Screens:"); err != nil {
+		return err
+	}
+	for _, screen := range screens {
+		if err := writeWorkflowScreen(w, screen); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeWorkflowScreen(w io.Writer, screen pkgwebcap.WorkflowScreenCaptureResult) error {
+	if _, err := fmt.Fprintf(w, "  - %s %s -> %s", screen.ScreenID, screen.Label, screen.OutputPath); err != nil {
+		return err
+	}
+	if err := writeWorkflowScreenMetadata(w, screen); err != nil {
+		return err
+	}
+	if err := writeWorkflowScreenWarnings(w, screen); err != nil {
+		return err
+	}
+	if err := writeWorkflowScreenTiling(w, screen.Capture.Tiling); err != nil {
+		return err
+	}
+	_, err := fmt.Fprintln(w)
+	return err
+}
+
+func writeWorkflowScreenMetadata(w io.Writer, screen pkgwebcap.WorkflowScreenCaptureResult) error {
+	metadataPath := firstNonEmpty(screen.MetadataPath, screen.Capture.MetadataPath)
+	if metadataPath == "" {
+		return nil
+	}
+	_, err := fmt.Fprintf(w, " metadata=%s", metadataPath)
+	return err
+}
+
+func writeWorkflowScreenWarnings(w io.Writer, screen pkgwebcap.WorkflowScreenCaptureResult) error {
+	if len(screen.Capture.Warnings) == 0 {
+		return nil
+	}
+	_, err := fmt.Fprintf(w, " (%d warnings)", len(screen.Capture.Warnings))
+	return err
+}
+
+func writeWorkflowScreenTiling(w io.Writer, tiling *pkgwebcap.CaptureTiling) error {
+	if tiling == nil {
+		return nil
+	}
+	_, err := fmt.Fprintf(w, " tiled=%s tiles=%d/%d", tiling.Status, tiling.CompletedCount, tiling.TileCount)
+	return err
 }

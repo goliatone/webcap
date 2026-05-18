@@ -24,23 +24,8 @@ func writeCapture(w io.Writer, result pkgwebcap.CaptureResult) error {
 			return err
 		}
 	}
-	if result.Tiling != nil {
-		if _, err := fmt.Fprintf(w, "Tiling: %s (%d/%d tiles)\n", result.Tiling.Status, result.Tiling.CompletedCount, result.Tiling.TileCount); err != nil {
-			return err
-		}
-		if _, err := fmt.Fprintf(w, "Target: %.0fx%.0f\n", result.Tiling.TargetBounds.Width, result.Tiling.TargetBounds.Height); err != nil {
-			return err
-		}
-		if len(result.Tiling.Tiles) > 0 && result.Tiling.Tiles[0].OutputPath != "" {
-			if _, err := fmt.Fprintf(w, "First tile: %s\n", result.Tiling.Tiles[0].OutputPath); err != nil {
-				return err
-			}
-		}
-		if result.Tiling.StitchedPath != "" {
-			if _, err := fmt.Fprintf(w, "Stitched: %s\n", result.Tiling.StitchedPath); err != nil {
-				return err
-			}
-		}
+	if err := writeCaptureTiling(w, result.Tiling); err != nil {
+		return err
 	}
 	if !result.CapturedAt.IsZero() {
 		if _, err := fmt.Fprintf(w, "Captured: %s\n", result.CapturedAt.Format("2006-01-02T15:04:05Z07:00")); err != nil {
@@ -48,6 +33,29 @@ func writeCapture(w io.Writer, result pkgwebcap.CaptureResult) error {
 		}
 	}
 	return writeWarnings(w, result.Warnings)
+}
+
+func writeCaptureTiling(w io.Writer, tiling *pkgwebcap.CaptureTiling) error {
+	if tiling == nil {
+		return nil
+	}
+	if _, err := fmt.Fprintf(w, "Tiling: %s (%d/%d tiles)\n", tiling.Status, tiling.CompletedCount, tiling.TileCount); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "Target: %.0fx%.0f\n", tiling.TargetBounds.Width, tiling.TargetBounds.Height); err != nil {
+		return err
+	}
+	if len(tiling.Tiles) > 0 && tiling.Tiles[0].OutputPath != "" {
+		if _, err := fmt.Fprintf(w, "First tile: %s\n", tiling.Tiles[0].OutputPath); err != nil {
+			return err
+		}
+	}
+	if tiling.StitchedPath != "" {
+		if _, err := fmt.Fprintf(w, "Stitched: %s\n", tiling.StitchedPath); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func writeBatch(w io.Writer, result pkgwebcap.BatchResult) error {

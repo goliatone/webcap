@@ -1,6 +1,25 @@
 # Changelog
 
+# [0.6.0](https://github.com/goliatone/webcap/compare/v0.5.0...v0.6.0) - (2026-05-18)
+
+## <!-- 1 -->🐛 Bug Fixes
+
+- Code quality ([11cb259](https://github.com/goliatone/webcap/commit/11cb259f2fc577197937edadd614e45bbcf44a23))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- Wait for function implementation ([7146975](https://github.com/goliatone/webcap/commit/7146975f5719c28c72df5560e6ef6c865fe67a86))  - (goliatone)
+- Update skills ([2c321e8](https://github.com/goliatone/webcap/commit/2c321e89fff34109f82d2d8f1c20e0e80b0ad1a6))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update docs ([9736e1d](https://github.com/goliatone/webcap/commit/9736e1d2de2aaec3d4f0b786b073c0bddefea067))  - (goliatone)
+
 # [0.5.0](https://github.com/goliatone/webcap/compare/v0.4.0...v0.5.0) - (2026-05-11)
+
+## <!-- 12 -->🔖 Releases
+
+- V0.5.0 ([39d4d1f](https://github.com/goliatone/webcap/commit/39d4d1fe951227559fc2b6b17ac022abae3af99d))  - (goliatone)
 
 ## <!-- 16 -->➕ Add
 

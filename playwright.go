@@ -40,6 +40,13 @@ type playwrightBridgeResponse struct {
 	BytesBase64 string           `json:"bytes_base64"`
 }
 
+type playwrightBridgeError struct {
+	Message   string         `json:"message"`
+	Code      ErrorCode      `json:"code"`
+	Operation string         `json:"operation"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
+}
+
 func NewPlaywrightEngine(opts PlaywrightOptions) (*PlaywrightEngine, error) {
 	if opts.NodeBinary == "" {
 		opts.NodeBinary = "node"
@@ -104,7 +111,7 @@ func (e *PlaywrightEngine) Capture(ctx context.Context, req CaptureRequest) (Eng
 	cmd.Stdin = strings.NewReader(string(encoded))
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return EngineResult{}, newCaptureError(CodeCapture, "playwright_capture", strings.TrimSpace(string(output)), err)
+		return EngineResult{}, playwrightCaptureError(strings.TrimSpace(string(output)), err)
 	}
 
 	var response playwrightBridgeResponse
@@ -122,4 +129,25 @@ func (e *PlaywrightEngine) Capture(ctx context.Context, req CaptureRequest) (Eng
 		Timing:   response.Timing,
 		Warnings: cloneWarnings(response.Warnings),
 	}, nil
+}
+
+func playwrightCaptureError(output string, err error) error {
+	message := strings.TrimSpace(output)
+	var bridgeErr playwrightBridgeError
+	if unmarshalErr := json.Unmarshal([]byte(message), &bridgeErr); unmarshalErr == nil && strings.TrimSpace(bridgeErr.Message) != "" {
+		code := bridgeErr.Code
+		if code == "" {
+			code = CodeCapture
+		}
+		operation := strings.TrimSpace(bridgeErr.Operation)
+		if operation == "" {
+			operation = "playwright_capture"
+		}
+		captureErr := newCaptureError(code, operation, bridgeErr.Message, err)
+		if len(bridgeErr.Metadata) > 0 {
+			captureErr.Metadata = bridgeErr.Metadata
+		}
+		return captureErr
+	}
+	return newCaptureError(CodeCapture, "playwright_capture", message, err)
 }

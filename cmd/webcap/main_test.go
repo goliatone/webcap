@@ -597,6 +597,58 @@ func TestRunSemanticDiffUsesDefaultBuiltInProvider(t *testing.T) {
 	}
 }
 
+func TestRunSemanticDiffJSONErrorIncludesProviderDiagnostics(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", "45")
+		w.Header().Set("X-Request-Id", "req-cli")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"message":"slow down","type":"rate_limit_error","code":"rate_limit_exceeded"}}`))
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	currentPath := filepath.Join(dir, "current.png")
+	referencePath := filepath.Join(dir, "reference.png")
+	writeMainTestPNG(t, currentPath, color.NRGBA{R: 255, A: 255})
+	writeMainTestPNG(t, referencePath, color.NRGBA{B: 255, A: 255})
+	t.Setenv("OPENAI_API_KEY", "test-key")
+
+	var stdout, stderr bytes.Buffer
+	code := runCLI(context.Background(), []string{
+		"semantic-diff",
+		"--json",
+		"--provider", "openai",
+		"--model", "gpt-test",
+		"--openai-base-url", server.URL,
+		currentPath,
+		referencePath,
+	}, strings.NewReader(""), &stdout, &stderr)
+	if code == 0 {
+		t.Fatal("expected non-zero exit code")
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("expected no stdout, got:\n%s", stdout.String())
+	}
+	var envelope struct {
+		Code     string         `json:"code"`
+		Message  string         `json:"message"`
+		Metadata map[string]any `json:"metadata"`
+	}
+	if err := json.Unmarshal(stderr.Bytes(), &envelope); err != nil {
+		t.Fatalf("stderr is not valid JSON: %v\n%s", err, stderr.String())
+	}
+	if envelope.Code != string(pkgwebcap.CodeProviderRateLimited) || !strings.Contains(envelope.Message, "retry after 45") {
+		t.Fatalf("unexpected provider error envelope: %#v", envelope)
+	}
+	if envelope.Metadata["provider"] != "openai" || envelope.Metadata["status_code"] != "429" || envelope.Metadata["retry_after"] != "45" || envelope.Metadata["request_id"] != "req-cli" {
+		t.Fatalf("expected safe provider diagnostics, got %#v", envelope.Metadata)
+	}
+	if strings.Contains(stderr.String(), "test-key") || strings.Contains(stderr.String(), "Authorization") {
+		t.Fatalf("provider diagnostics leaked sensitive data:\n%s", stderr.String())
+	}
+}
+
 func TestRunSemanticDiffUsesCodexCLIProvider(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell fake uses POSIX sh")

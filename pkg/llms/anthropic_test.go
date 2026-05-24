@@ -2,6 +2,7 @@ package llms
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -26,6 +27,27 @@ func TestAnthropicProviderBuildsVisionRequest(t *testing.T) {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("expected Anthropic body to contain %q: %s", expected, text)
 		}
+	}
+}
+
+func TestAnthropicProviderRejectsOversizedRequestBodyBeforeHTTP(t *testing.T) {
+	called := false
+	provider := NewAnthropicProvider(AnthropicOptions{
+		CredentialResolver: func(context.Context, string) (string, error) { return "test-key", nil },
+		HTTPClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			called = true
+			return nil, nil
+		})},
+	})
+	_, err := provider.CompareImages(context.Background(), Request{
+		Model:               "claude-test",
+		Prompt:              strings.Repeat("x", 200),
+		MaxOutputTokens:     10,
+		MaxRequestBodyBytes: 20,
+	})
+	var budgetErr *PayloadBudgetError
+	if !errors.As(err, &budgetErr) || budgetErr.LimitName != "max_request_body_bytes" || called {
+		t.Fatalf("expected preflight request budget error without HTTP call, called=%v err=%v budget=%#v", called, err, budgetErr)
 	}
 }
 
@@ -85,9 +107,34 @@ func TestAnthropicProviderRejectsEmptyTextResponse(t *testing.T) {
 func TestAnthropicProviderReportsHTTPError(t *testing.T) {
 	provider := NewAnthropicProvider(AnthropicOptions{
 		CredentialResolver: func(context.Context, string) (string, error) { return "test-key", nil },
-		HTTPClient:         staticHTTPClient(429, `{"error":"rate limited"}`),
+		HTTPClient: staticHTTPClientWithHeaders(403, `{"type":"error","error":{"type":"permission_error","message":"quota exceeded"}}`, http.Header{
+			"Anthropic-Request-Id":      []string{"req-anthropic"},
+			"Anthropic-RateLimit-Limit": []string{"50"},
+		}),
 	})
-	if _, err := provider.CompareImages(context.Background(), Request{Model: "claude-test", Prompt: "Compare"}); err == nil || !strings.Contains(err.Error(), "HTTP 429") {
-		t.Fatalf("expected HTTP status error, got %v", err)
+	_, err := provider.CompareImages(context.Background(), Request{Model: "claude-test", Prompt: "Compare"})
+	var httpErr *ProviderHTTPError
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("expected typed HTTP error, got %T %[1]v", err)
+	}
+	if httpErr.Provider != ProviderAnthropic || httpErr.StatusCode != 403 || httpErr.RequestID != "req-anthropic" || httpErr.ErrorType != "permission_error" {
+		t.Fatalf("unexpected HTTP diagnostics: %#v", httpErr)
+	}
+	if httpErr.RateLimit["anthropic_ratelimit_limit"] != "50" || strings.Contains(httpErr.Error(), "test-key") {
+		t.Fatalf("unexpected safe metadata: err=%v meta=%#v", httpErr, httpErr.Metadata())
+	}
+}
+
+func TestAnthropicProviderHTTPErrorStatuses(t *testing.T) {
+	for _, status := range []int{400, 401, 403, 413, 429, 503} {
+		provider := NewAnthropicProvider(AnthropicOptions{
+			CredentialResolver: func(context.Context, string) (string, error) { return "test-key", nil },
+			HTTPClient:         staticHTTPClient(status, `{"type":"error","error":{"type":"invalid_request_error","message":"bad request"}}`),
+		})
+		_, err := provider.CompareImages(context.Background(), Request{Model: "claude-test", Prompt: "Compare"})
+		var httpErr *ProviderHTTPError
+		if !errors.As(err, &httpErr) || httpErr.StatusCode != status || httpErr.ErrorType != "invalid_request_error" {
+			t.Fatalf("status %d: expected typed HTTP diagnostics, got err=%v http=%#v", status, err, httpErr)
+		}
 	}
 }

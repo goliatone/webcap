@@ -2,6 +2,7 @@ package llms
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -75,6 +76,45 @@ printf '{"summary":"from file","verdict":"no_meaningful_change","severity":"info
 	} {
 		if !strings.Contains(record, expected) {
 			t.Fatalf("expected record to contain %q, got:\n%s", expected, record)
+		}
+	}
+}
+
+func TestCodexCLIProviderWritesStrictSemanticSchema(t *testing.T) {
+	path, err := writeCodexSchema(t.TempDir())
+	if err != nil {
+		t.Fatalf("writeCodexSchema returned error: %v", err)
+	}
+	payload, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read schema: %v", err)
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(payload, &schema); err != nil {
+		t.Fatalf("schema was not JSON: %v", err)
+	}
+	assertStrictSchemaObjects(t, schema)
+	properties := schema["properties"].(map[string]any)
+	for _, required := range []string{"summary", "verdict", "severity", "differences"} {
+		if _, ok := properties[required]; !ok {
+			t.Fatalf("schema missing property %q: %#v", required, properties)
+		}
+	}
+}
+
+func assertStrictSchemaObjects(t *testing.T, value any) {
+	t.Helper()
+	switch typed := value.(type) {
+	case map[string]any:
+		if typed["type"] == "object" && typed["additionalProperties"] != false {
+			t.Fatalf("object schema is not strict: %#v", typed)
+		}
+		for _, child := range typed {
+			assertStrictSchemaObjects(t, child)
+		}
+	case []any:
+		for _, child := range typed {
+			assertStrictSchemaObjects(t, child)
 		}
 	}
 }

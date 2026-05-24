@@ -3,7 +3,7 @@ package webcap
 import (
 	"context"
 	"encoding/json"
-	"errors"
+	"fmt"
 	"image"
 	"image/color"
 	"net/http"
@@ -994,6 +994,7 @@ func TestWorkflowSemanticDiffProviderFailureBecomesWarning(t *testing.T) {
 			SemanticDiff: WorkflowSemanticDiff{
 				Enabled:  new(true),
 				Provider: "openai",
+				Model:    "gpt-test",
 				Run:      SemanticDiffRunAlways,
 			},
 		},
@@ -1004,8 +1005,12 @@ func TestWorkflowSemanticDiffProviderFailureBecomesWarning(t *testing.T) {
 			ReferenceImage: referencePath,
 		}},
 	}
+	providerErr := newCaptureError(CodeProviderRateLimited, "semantic_llms_provider", "openai rate limited the semantic diff request; retry after 10", nil).
+		WithMetadata("provider", "openai").
+		WithMetadata("status_code", "429").
+		WithMetadata("retry_after", "10")
 	service := NewServiceWithOptions(nil, Options{SemanticDiff: SemanticDiffOptions{
-		Providers: map[string]SemanticDiffProvider{"openai": &fakeSemanticProvider{name: "openai", err: errors.New("semantic unavailable")}},
+		Providers: map[string]SemanticDiffProvider{"openai": &fakeSemanticProvider{name: "openai", err: providerErr}},
 	}})
 	result, err := service.GenerateWorkflowReport(context.Background(), WorkflowReportRequest{Scenario: scenario})
 	if err != nil {
@@ -1016,6 +1021,10 @@ func TestWorkflowSemanticDiffProviderFailureBecomesWarning(t *testing.T) {
 	}
 	if len(result.Entries[0].Warnings) == 0 || result.Entries[0].Status.Level != workflowStatusWarning {
 		t.Fatalf("expected semantic provider failure warning, got entry %#v", result.Entries[0])
+	}
+	warning := result.Entries[0].Warnings[0]
+	if warning.Code != string(CodeProviderRateLimited) || warning.Metadata["retry_after"] != "10" || strings.Contains(fmt.Sprint(warning.Metadata), "OPENAI_API_KEY") {
+		t.Fatalf("expected safe provider diagnostics in warning, got %#v", warning)
 	}
 }
 

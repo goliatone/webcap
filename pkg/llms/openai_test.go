@@ -2,6 +2,7 @@ package llms
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -33,6 +34,27 @@ func TestOpenAIProviderBuildsVisionRequest(t *testing.T) {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("expected OpenAI body to contain %q: %s", expected, text)
 		}
+	}
+}
+
+func TestOpenAIProviderRejectsOversizedRequestBodyBeforeHTTP(t *testing.T) {
+	called := false
+	provider := NewOpenAIProvider(OpenAIOptions{
+		CredentialResolver: func(context.Context, string) (string, error) { return "test-key", nil },
+		HTTPClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			called = true
+			return nil, nil
+		})},
+	})
+	_, err := provider.CompareImages(context.Background(), Request{
+		Model:               "gpt-test",
+		Prompt:              strings.Repeat("x", 200),
+		MaxOutputTokens:     10,
+		MaxRequestBodyBytes: 20,
+	})
+	var budgetErr *PayloadBudgetError
+	if !errors.As(err, &budgetErr) || budgetErr.LimitName != "max_request_body_bytes" || called {
+		t.Fatalf("expected preflight request budget error without HTTP call, called=%v err=%v budget=%#v", called, err, budgetErr)
 	}
 }
 
@@ -92,19 +114,55 @@ func TestOpenAIProviderRejectsEmptyTextResponse(t *testing.T) {
 func TestOpenAIProviderReportsHTTPError(t *testing.T) {
 	provider := NewOpenAIProvider(OpenAIOptions{
 		CredentialResolver: func(context.Context, string) (string, error) { return "test-key", nil },
-		HTTPClient:         staticHTTPClient(500, `{"error":"provider unavailable"}`),
+		HTTPClient: staticHTTPClientWithHeaders(429, `{"error":{"message":"slow down","type":"rate_limit_error","code":"rate_limit_exceeded"}}`, http.Header{
+			"Retry-After":       []string{"12"},
+			"X-Request-Id":      []string{"req-openai"},
+			"X-RateLimit-Limit": []string{"100"},
+		}),
 	})
-	if _, err := provider.CompareImages(context.Background(), Request{Model: "gpt-test", Prompt: "Compare"}); err == nil || !strings.Contains(err.Error(), "HTTP 500") {
-		t.Fatalf("expected HTTP status error, got %v", err)
+	_, err := provider.CompareImages(context.Background(), Request{Model: "gpt-test", Prompt: "Compare"})
+	var httpErr *ProviderHTTPError
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("expected typed HTTP error, got %T %[1]v", err)
+	}
+	if httpErr.Provider != ProviderOpenAI || httpErr.StatusCode != 429 || httpErr.StatusClass != "4xx" || httpErr.RetryAfter != "12" || httpErr.RequestID != "req-openai" {
+		t.Fatalf("unexpected HTTP diagnostics: %#v", httpErr)
+	}
+	if httpErr.ErrorType != "rate_limit_error" || httpErr.ErrorCode != "rate_limit_exceeded" || !strings.Contains(httpErr.BodyExcerpt, "slow down") {
+		t.Fatalf("expected parsed provider body, got %#v", httpErr)
+	}
+	if strings.Contains(httpErr.Error(), "test-key") || strings.Contains(httpErr.Metadata()["body_excerpt"], "Authorization") {
+		t.Fatalf("HTTP diagnostics leaked sensitive request data: %v %#v", httpErr, httpErr.Metadata())
+	}
+}
+
+func TestOpenAIProviderHTTPErrorStatuses(t *testing.T) {
+	for _, status := range []int{400, 401, 403, 413, 429, 500} {
+		provider := NewOpenAIProvider(OpenAIOptions{
+			CredentialResolver: func(context.Context, string) (string, error) { return "test-key", nil },
+			HTTPClient:         staticHTTPClient(status, `{"error":{"message":"provider problem","type":"invalid_request_error","code":"bad_request"}}`),
+		})
+		_, err := provider.CompareImages(context.Background(), Request{Model: "gpt-test", Prompt: "Compare"})
+		var httpErr *ProviderHTTPError
+		if !errors.As(err, &httpErr) || httpErr.StatusCode != status || httpErr.ErrorCode != "bad_request" {
+			t.Fatalf("status %d: expected typed HTTP diagnostics, got err=%v http=%#v", status, err, httpErr)
+		}
 	}
 }
 
 func staticHTTPClient(status int, body string) *http.Client {
+	return staticHTTPClientWithHeaders(status, body, nil)
+}
+
+func staticHTTPClientWithHeaders(status int, body string, headers http.Header) *http.Client {
 	return &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if headers == nil {
+			headers = make(http.Header)
+		}
 		return &http.Response{
 			StatusCode: status,
 			Body:       io.NopCloser(strings.NewReader(body)),
-			Header:     make(http.Header),
+			Header:     headers,
 			Request:    req,
 		}, nil
 	})}

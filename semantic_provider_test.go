@@ -86,8 +86,54 @@ func TestLLMSSemanticDiffProviderMapsExecutionTimeout(t *testing.T) {
 	})
 	_, err := adapter.CompareImages(context.Background(), SemanticProviderRequest{Provider: "codex-cli"})
 	var captureErr *Error
-	if !errors.As(err, &captureErr) || captureErr.Code != CodeTimeout {
+	if !errors.As(err, &captureErr) || captureErr.Code != CodeProviderTimeout {
 		t.Fatalf("expected timeout capture error, got %v %#v", err, captureErr)
+	}
+}
+
+func TestLLMSSemanticDiffProviderMapsHTTPDiagnostics(t *testing.T) {
+	provider := NewOpenAISemanticDiffProvider(OpenAISemanticProviderOptions{
+		CredentialResolver: func(context.Context, string) (string, error) { return "test-key", nil },
+		HTTPClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: 429,
+				Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"slow down","type":"rate_limit_error","code":"rate_limit_exceeded"}}`)),
+				Header: http.Header{
+					"Retry-After":  []string{"30"},
+					"X-Request-Id": []string{"req-semantic"},
+				},
+				Request: req,
+			}, nil
+		})},
+	})
+	_, err := provider.CompareImages(context.Background(), SemanticProviderRequest{Model: "gpt-test", Prompt: "Compare"})
+	var captureErr *Error
+	if !errors.As(err, &captureErr) || captureErr.Code != CodeProviderRateLimited {
+		t.Fatalf("expected provider rate limit error, got %v %#v", err, captureErr)
+	}
+	if captureErr.Metadata["status_code"] != "429" || captureErr.Metadata["retry_after"] != "30" || captureErr.Metadata["request_id"] != "req-semantic" {
+		t.Fatalf("expected safe provider metadata, got %#v", captureErr.Metadata)
+	}
+	warning := errorWarning(err)
+	if warning.Code != string(CodeProviderRateLimited) || warning.Metadata["request_id"] != "req-semantic" {
+		t.Fatalf("expected warning metadata to preserve provider diagnostics, got %#v", warning)
+	}
+}
+
+func TestLLMSSemanticDiffProviderMapsCodexInvalidSchema(t *testing.T) {
+	adapter := NewLLMSSemanticDiffProvider(&recordingLLMSProvider{
+		name: "codex-cli",
+		err: &llms.ExecutionError{
+			Provider: "codex-cli",
+			Command:  "codex",
+			ExitCode: 1,
+			Stderr:   "invalid_json_schema: additionalProperties must be false",
+		},
+	})
+	_, err := adapter.CompareImages(context.Background(), SemanticProviderRequest{Provider: "codex-cli"})
+	var captureErr *Error
+	if !errors.As(err, &captureErr) || captureErr.Code != CodeProviderInvalidRequest {
+		t.Fatalf("expected provider invalid request error, got %v %#v", err, captureErr)
 	}
 }
 

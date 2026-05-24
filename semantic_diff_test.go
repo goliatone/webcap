@@ -13,10 +13,11 @@ import (
 )
 
 type fakeSemanticProvider struct {
-	name    string
-	resp    SemanticProviderResponse
-	err     error
-	lastReq SemanticProviderRequest
+	name      string
+	resp      SemanticProviderResponse
+	err       error
+	lastReq   SemanticProviderRequest
+	onCompare func(SemanticProviderRequest)
 }
 
 func (p *fakeSemanticProvider) Name() string {
@@ -28,6 +29,9 @@ func (p *fakeSemanticProvider) Name() string {
 
 func (p *fakeSemanticProvider) CompareImages(_ context.Context, req SemanticProviderRequest) (SemanticProviderResponse, error) {
 	p.lastReq = req
+	if p.onCompare != nil {
+		p.onCompare(req)
+	}
 	if p.err != nil {
 		return SemanticProviderResponse{}, p.err
 	}
@@ -192,6 +196,82 @@ func TestServiceSemanticDiffPersistsRawResponseOnlyWhenEnabled(t *testing.T) {
 	}
 	if strings.Contains(string(metadata), raw) {
 		t.Fatal("metadata should exclude raw provider payload even when raw persistence is enabled")
+	}
+}
+
+func TestServiceSemanticDiffBudgetsAndResizesProviderCopies(t *testing.T) {
+	dir := t.TempDir()
+	currentPath := filepath.Join(dir, "current.png")
+	referencePath := filepath.Join(dir, "reference.png")
+	pixels := make([]color.NRGBA, 120)
+	for i := range pixels {
+		pixels[i] = color.NRGBA{R: uint8(i), G: 50, B: 10, A: 255}
+	}
+	if err := writeTestPNG(currentPath, pixels); err != nil {
+		t.Fatalf("write current: %v", err)
+	}
+	if err := writeTestPNG(referencePath, []color.NRGBA{{A: 255}}); err != nil {
+		t.Fatalf("write reference: %v", err)
+	}
+
+	var providerPath string
+	provider := &fakeSemanticProvider{
+		resp: SemanticProviderResponse{Provider: "fake", RawText: `{"summary":"ok","verdict":"no_meaningful_change","severity":"info"}`},
+		onCompare: func(req SemanticProviderRequest) {
+			providerPath = req.Images[0].Path
+			if providerPath == currentPath {
+				t.Fatalf("expected resized provider copy, got original path")
+			}
+			if _, err := os.Stat(providerPath); err != nil {
+				t.Fatalf("provider copy did not exist during provider call: %v", err)
+			}
+		},
+	}
+	service := NewServiceWithOptions(nil, Options{SemanticDiff: SemanticDiffOptions{
+		DefaultProvider:  "fake",
+		Providers:        map[string]SemanticDiffProvider{"fake": provider},
+		MaxImageLongEdge: 20,
+		ResizeImages:     true,
+	}})
+	result, err := service.SemanticDiff(context.Background(), SemanticDiffRequest{
+		CurrentPath:   currentPath,
+		ReferencePath: referencePath,
+		MetadataPath:  filepath.Join(dir, "semantic.json"),
+	})
+	if err != nil {
+		t.Fatalf("SemanticDiff returned error: %v", err)
+	}
+	if len(result.ImageMetadata) == 0 || result.ImageMetadata[0].ResizeReason != "max_long_edge" || result.ImageMetadata[0].ProviderPath == "" {
+		t.Fatalf("expected resize metadata, got %#v", result.ImageMetadata)
+	}
+	if _, err := os.Stat(currentPath); err != nil {
+		t.Fatalf("original image was not preserved: %v", err)
+	}
+	if _, err := os.Stat(providerPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected provider copy cleanup after call, stat err=%v", err)
+	}
+}
+
+func TestServiceSemanticDiffRejectsCombinedEncodedBudget(t *testing.T) {
+	dir := t.TempDir()
+	currentPath := filepath.Join(dir, "current.png")
+	referencePath := filepath.Join(dir, "reference.png")
+	if err := writeTestPNG(currentPath, []color.NRGBA{{A: 255}}); err != nil {
+		t.Fatalf("write current: %v", err)
+	}
+	if err := writeTestPNG(referencePath, []color.NRGBA{{A: 255}}); err != nil {
+		t.Fatalf("write reference: %v", err)
+	}
+	provider := &fakeSemanticProvider{resp: SemanticProviderResponse{RawText: `{"summary":"ok","verdict":"no_meaningful_change","severity":"info"}`}}
+	service := NewServiceWithOptions(nil, Options{SemanticDiff: SemanticDiffOptions{
+		DefaultProvider:              "fake",
+		Providers:                    map[string]SemanticDiffProvider{"fake": provider},
+		MaxCombinedEncodedImageBytes: 1,
+	}})
+	_, err := service.SemanticDiff(context.Background(), SemanticDiffRequest{CurrentPath: currentPath, ReferencePath: referencePath})
+	var captureErr *Error
+	if !errors.As(err, &captureErr) || captureErr.Code != CodeProviderPayloadTooLarge || provider.lastReq.Provider != "" {
+		t.Fatalf("expected encoded budget failure before provider call, got err=%v capture=%#v req=%#v", err, captureErr, provider.lastReq)
 	}
 }
 

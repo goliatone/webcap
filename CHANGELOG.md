@@ -1,10 +1,33 @@
 # Changelog
 
+# [0.6.1](https://github.com/goliatone/webcap/compare/v0.6.0...v0.6.1) - (2026-05-24)
+
+## <!-- 1 -->🐛 Bug Fixes
+
+- Code quality ([6aa9d2e](https://github.com/goliatone/webcap/commit/6aa9d2e767598c98ac7f5f8033a28c88944a8af9))  - (goliatone)
+- Semantic diff implementation ([5cfe56c](https://github.com/goliatone/webcap/commit/5cfe56c7b1e8d6e78cdf02bc8ca83e1cf593bc30))  - (goliatone)
+- Semantic diff generation ([f3edee2](https://github.com/goliatone/webcap/commit/f3edee2ee0c60f57f4839fdca6526a7381ae4069))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- Better error handling ([8aa3c09](https://github.com/goliatone/webcap/commit/8aa3c09c06cba52c0149ea61400c9c0679565a6a))  - (goliatone)
+- Error metadata ([27a5492](https://github.com/goliatone/webcap/commit/27a5492645889e82d34c1097b9dbf720d5d69a00))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update docs ([bd573f3](https://github.com/goliatone/webcap/commit/bd573f3f407d39ca5e7aa292e8e83a29b1aaa85f))  - (goliatone)
+- Update tests ([11f3e0a](https://github.com/goliatone/webcap/commit/11f3e0a330d959dcc40baf5c16c52f242bc6c374))  - (goliatone)
+- Update deps ([10d9c4f](https://github.com/goliatone/webcap/commit/10d9c4fb0b575f6fee0a1b231dfd6de923716bfa))  - (goliatone)
+
 # [0.6.0](https://github.com/goliatone/webcap/compare/v0.5.0...v0.6.0) - (2026-05-18)
 
 ## <!-- 1 -->🐛 Bug Fixes
 
 - Code quality ([11cb259](https://github.com/goliatone/webcap/commit/11cb259f2fc577197937edadd614e45bbcf44a23))  - (goliatone)
+
+## <!-- 12 -->🔖 Releases
+
+- V0.6.0 ([ca41038](https://github.com/goliatone/webcap/commit/ca410389bfcf9ab432ae1d5a9a8d203d0aca4068))  - (goliatone)
 
 ## <!-- 16 -->➕ Add
 

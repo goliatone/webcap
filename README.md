@@ -130,6 +130,8 @@ service := webcap.NewServiceWithOptions(nil, webcap.Options{
 
 Set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` for the built-in providers. Raw provider responses are not written into metadata; use `PersistRawResponse` or `--persist-raw-response` only for local debugging because screenshots and model output can contain sensitive UI content.
 Hosts can set `Options.SemanticDiff.RedactImage` to replace or reject screenshot paths before provider payload encoding.
+Hosts can also configure semantic payload budgets such as `MaxImageBytes`, `MaxProviderImageBytes`, `MaxImageLongEdge`, `MaxImagePixels`, `MaxEncodedImageBytes`, `MaxCombinedEncodedImageBytes`, and `MaxRequestBodyBytes`. `MaxImageBytes` is a hard source-file guard before reads; set `ResizeImages: true` to shrink temporary provider-safe image copies for provider, encoded, and final request budgets while preserving the original artifacts.
+Provider failures use stable error codes such as `provider_rate_limited`, `provider_auth`, `provider_quota`, `provider_invalid_request`, `provider_payload_too_large`, `provider_unavailable`, `provider_timeout`, and `provider_execution_failed`; JSON output and workflow warnings include only safe metadata like status, retry-after, request IDs, provider error codes, and budget values.
 
 Configure Codex CLI at process level, not in workflow YAML:
 

@@ -10,18 +10,26 @@ import (
 type ErrorCode string
 
 const (
-	CodeValidation       ErrorCode = "validation_error"
-	CodeManifest         ErrorCode = "manifest_error"
-	CodeBrowserStartup   ErrorCode = "browser_startup_error"
-	CodeNavigation       ErrorCode = "navigation_error"
-	CodeSelectorNotFound ErrorCode = "selector_not_found"
-	CodeNoVisibleMatches ErrorCode = "no_visible_matches"
-	CodeTimeout          ErrorCode = "timeout_error"
-	CodeWrite            ErrorCode = "write_error"
-	CodeCapture          ErrorCode = "capture_error"
-	CodeOversize         ErrorCode = "oversize_error"
-	CodeUnsupported      ErrorCode = "unsupported_error"
-	CodePartialCapture   ErrorCode = "partial_capture_error"
+	CodeValidation              ErrorCode = "validation_error"
+	CodeManifest                ErrorCode = "manifest_error"
+	CodeBrowserStartup          ErrorCode = "browser_startup_error"
+	CodeNavigation              ErrorCode = "navigation_error"
+	CodeSelectorNotFound        ErrorCode = "selector_not_found"
+	CodeNoVisibleMatches        ErrorCode = "no_visible_matches"
+	CodeTimeout                 ErrorCode = "timeout_error"
+	CodeWrite                   ErrorCode = "write_error"
+	CodeCapture                 ErrorCode = "capture_error"
+	CodeOversize                ErrorCode = "oversize_error"
+	CodeUnsupported             ErrorCode = "unsupported_error"
+	CodePartialCapture          ErrorCode = "partial_capture_error"
+	CodeProviderRateLimited     ErrorCode = "provider_rate_limited"
+	CodeProviderAuth            ErrorCode = "provider_auth"
+	CodeProviderQuota           ErrorCode = "provider_quota"
+	CodeProviderInvalidRequest  ErrorCode = "provider_invalid_request"
+	CodeProviderPayloadTooLarge ErrorCode = "provider_payload_too_large"
+	CodeProviderUnavailable     ErrorCode = "provider_unavailable"
+	CodeProviderTimeout         ErrorCode = "provider_timeout"
+	CodeProviderExecutionFailed ErrorCode = "provider_execution_failed"
 )
 
 type Error struct {
@@ -147,8 +155,9 @@ func classifyCaptureError(operation string, err error) error {
 func errorWarning(err error) CaptureWarning {
 	if captureErr, ok := errors.AsType[*Error](err); ok {
 		return CaptureWarning{
-			Code:    string(captureErr.Code),
-			Message: captureErr.Message,
+			Code:     string(captureErr.Code),
+			Message:  captureErr.Message,
+			Metadata: cloneAnyMap(captureErr.Metadata),
 		}
 	}
 	return CaptureWarning{

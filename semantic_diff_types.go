@@ -102,25 +102,41 @@ type SemanticDifference struct {
 }
 
 type SemanticDiffResult struct {
-	CurrentPath      string                 `json:"current_path"`
-	ReferencePath    string                 `json:"reference_path"`
-	Provider         string                 `json:"provider"`
-	Model            string                 `json:"model,omitempty"`
-	Summary          string                 `json:"summary"`
-	Differences      []SemanticDifference   `json:"differences,omitempty"`
-	Verdict          SemanticDiffVerdict    `json:"verdict"`
-	Severity         SemanticDiffSeverity   `json:"severity"`
-	Prompt           SemanticPromptMetadata `json:"prompt"`
-	PixelContext     SemanticPixelContext   `json:"pixel_context"`
-	MetadataPath     string                 `json:"metadata_path,omitempty"`
-	RawResponsePath  string                 `json:"raw_response_path,omitempty"`
-	Warnings         []CaptureWarning       `json:"warnings,omitempty"`
-	ProviderMetadata map[string]string      `json:"provider_metadata,omitempty"`
-	Usage            SemanticProviderUsage  `json:"usage"`
-	StartedAt        time.Time              `json:"started_at"`
-	CompletedAt      time.Time              `json:"completed_at"`
-	Duration         string                 `json:"duration,omitempty"`
-	RawResponse      string                 `json:"-"`
+	CurrentPath      string                  `json:"current_path"`
+	ReferencePath    string                  `json:"reference_path"`
+	Provider         string                  `json:"provider"`
+	Model            string                  `json:"model,omitempty"`
+	Summary          string                  `json:"summary"`
+	Differences      []SemanticDifference    `json:"differences,omitempty"`
+	Verdict          SemanticDiffVerdict     `json:"verdict"`
+	Severity         SemanticDiffSeverity    `json:"severity"`
+	Prompt           SemanticPromptMetadata  `json:"prompt"`
+	PixelContext     SemanticPixelContext    `json:"pixel_context"`
+	MetadataPath     string                  `json:"metadata_path,omitempty"`
+	RawResponsePath  string                  `json:"raw_response_path,omitempty"`
+	Warnings         []CaptureWarning        `json:"warnings,omitempty"`
+	ImageMetadata    []SemanticImageMetadata `json:"image_metadata,omitempty"`
+	ProviderMetadata map[string]string       `json:"provider_metadata,omitempty"`
+	Usage            SemanticProviderUsage   `json:"usage"`
+	StartedAt        time.Time               `json:"started_at"`
+	CompletedAt      time.Time               `json:"completed_at"`
+	Duration         string                  `json:"duration,omitempty"`
+	RawResponse      string                  `json:"-"`
+}
+
+type SemanticImageMetadata struct {
+	Role             string         `json:"role"`
+	OriginalPath     string         `json:"original_path"`
+	MIMEType         string         `json:"mime_type"`
+	OriginalByteSize int64          `json:"original_byte_size"`
+	OriginalWidth    int            `json:"original_width,omitempty"`
+	OriginalHeight   int            `json:"original_height,omitempty"`
+	ProviderPath     string         `json:"provider_path,omitempty"`
+	ProviderByteSize int64          `json:"provider_byte_size"`
+	ProviderWidth    int            `json:"provider_width,omitempty"`
+	ProviderHeight   int            `json:"provider_height,omitempty"`
+	ResizeReason     string         `json:"resize_reason,omitempty"`
+	Limits           map[string]any `json:"limits,omitempty"`
 }
 
 type SemanticDiffService interface {

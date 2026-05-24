@@ -2,6 +2,7 @@ package webcap
 
 import (
 	"context"
+	"os"
 	"strings"
 	"time"
 )
@@ -45,6 +46,25 @@ func (s *Service) SemanticDiff(ctx context.Context, req SemanticDiffRequest) (Se
 	if persistRaw && normalized.RawResponsePath == "" {
 		normalized.RawResponsePath = normalized.MetadataPath + ".raw.txt"
 	}
+	tempDir := ""
+	if options.ResizeImages {
+		var err error
+		tempDir, err = os.MkdirTemp("", "webcap-semantic-*")
+		if err != nil {
+			return SemanticDiffResult{}, wrapCaptureError("prepare_semantic_image", err)
+		}
+		defer func() {
+			_ = os.RemoveAll(tempDir)
+		}()
+	}
+	imageOptions := semanticImagePrepareOptions{
+		MaxRawBytes:      options.MaxImageBytes,
+		MaxProviderBytes: options.MaxProviderImageBytes,
+		MaxLongEdge:      options.MaxImageLongEdge,
+		MaxPixels:        options.MaxImagePixels,
+		ResizeImages:     options.ResizeImages,
+		TempDir:          tempDir,
+	}
 
 	currentPath, err := applySemanticImageRedactor(ctx, options.RedactImage, "current", normalized.CurrentPath)
 	if err != nil {
@@ -54,11 +74,11 @@ func (s *Service) SemanticDiff(ctx context.Context, req SemanticDiffRequest) (Se
 	if err != nil {
 		return SemanticDiffResult{}, err
 	}
-	currentImage, err := prepareSemanticImagePayload(currentPath, "current", options.MaxImageBytes)
+	currentImage, err := prepareSemanticImagePayload(currentPath, "current", imageOptions)
 	if err != nil {
 		return SemanticDiffResult{}, err
 	}
-	referenceImage, err := prepareSemanticImagePayload(referencePath, "reference", options.MaxImageBytes)
+	referenceImage, err := prepareSemanticImagePayload(referencePath, "reference", imageOptions)
 	if err != nil {
 		return SemanticDiffResult{}, err
 	}
@@ -68,11 +88,14 @@ func (s *Service) SemanticDiff(ctx context.Context, req SemanticDiffRequest) (Se
 		if err != nil {
 			return SemanticDiffResult{}, err
 		}
-		diffImage, err := prepareSemanticImagePayload(pixelDiffPath, "pixel_diff", options.MaxImageBytes)
+		diffImage, err := prepareSemanticImagePayload(pixelDiffPath, "pixel_diff", imageOptions)
 		if err != nil {
 			return SemanticDiffResult{}, err
 		}
 		images = append(images, diffImage)
+	}
+	if err := validateSemanticEncodedBudgets(images, options.MaxEncodedImageBytes, options.MaxCombinedEncodedImageBytes); err != nil {
+		return SemanticDiffResult{}, err
 	}
 
 	prompt, promptMetadata, err := buildSemanticDiffPrompt(normalized)
@@ -86,13 +109,14 @@ func (s *Service) SemanticDiff(ctx context.Context, req SemanticDiffRequest) (Se
 
 	startedAt := s.now()
 	providerResponse, err := provider.CompareImages(callCtx, SemanticProviderRequest{
-		Provider:        normalized.Provider,
-		Model:           normalized.Model,
-		Prompt:          prompt,
-		Images:          images,
-		Timeout:         timeout,
-		MaxOutputTokens: normalized.MaxOutputTokens,
-		StructuredJSON:  true,
+		Provider:            normalized.Provider,
+		Model:               normalized.Model,
+		Prompt:              prompt,
+		Images:              images,
+		Timeout:             timeout,
+		MaxOutputTokens:     normalized.MaxOutputTokens,
+		StructuredJSON:      true,
+		MaxRequestBodyBytes: options.MaxRequestBodyBytes,
 	})
 	if err != nil {
 		return SemanticDiffResult{}, wrapCaptureError("semantic_diff_provider", err)
@@ -116,6 +140,7 @@ func (s *Service) SemanticDiff(ctx context.Context, req SemanticDiffRequest) (Se
 		PixelContext:     normalized.PixelContext,
 		MetadataPath:     normalized.MetadataPath,
 		Warnings:         append(append([]CaptureWarning(nil), providerResponse.Warnings...), parseWarnings...),
+		ImageMetadata:    semanticImageMetadata(images),
 		ProviderMetadata: cloneStringMap(providerResponse.Metadata),
 		Usage:            providerResponse.Usage,
 		StartedAt:        startedAt,

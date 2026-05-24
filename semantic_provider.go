@@ -19,13 +19,14 @@ type SemanticDiffProvider interface {
 }
 
 type SemanticProviderRequest struct {
-	Provider        string
-	Model           string
-	Prompt          string
-	Images          []SemanticImagePayload
-	Timeout         time.Duration
-	MaxOutputTokens int
-	StructuredJSON  bool
+	Provider            string
+	Model               string
+	Prompt              string
+	Images              []SemanticImagePayload
+	Timeout             time.Duration
+	MaxOutputTokens     int
+	StructuredJSON      bool
+	MaxRequestBodyBytes int64
 }
 
 type SemanticProviderResponse struct {

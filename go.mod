@@ -5,7 +5,7 @@ go 1.26.3
 require (
 	github.com/chromedp/cdproto v0.0.0-20250803210736-d308e07a266d
 	github.com/chromedp/chromedp v0.14.2
-	github.com/goliatone/go-command v0.18.1-0.20260312022159-f1917830b5f2
+	github.com/goliatone/go-command v0.19.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 

@@ -150,6 +150,45 @@ func TestOpenAIProviderHTTPErrorStatuses(t *testing.T) {
 	}
 }
 
+func TestOpenAIProviderLimitsHTTPErrorBodyRead(t *testing.T) {
+	body := &countingReadCloser{Reader: strings.NewReader(strings.Repeat("x", providerHTTPBodyLimit*4))}
+	provider := NewOpenAIProvider(OpenAIOptions{
+		CredentialResolver: func(context.Context, string) (string, error) { return "test-key", nil },
+		HTTPClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: 500,
+				Body:       body,
+				Header:     make(http.Header),
+				Request:    req,
+			}, nil
+		})},
+	})
+	_, err := provider.CompareImages(context.Background(), Request{Model: "gpt-test", Prompt: "Compare"})
+	var httpErr *ProviderHTTPError
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("expected typed HTTP error, got %v", err)
+	}
+	if body.bytesRead > providerHTTPBodyLimit+1 {
+		t.Fatalf("read too much provider error body: %d", body.bytesRead)
+	}
+	if !httpErr.BodyTruncated || len(httpErr.BodyExcerpt) != providerHTTPBodyLimit {
+		t.Fatalf("expected truncated body excerpt, got %#v", httpErr)
+	}
+}
+
+type countingReadCloser struct {
+	*strings.Reader
+	bytesRead int
+}
+
+func (r *countingReadCloser) Read(p []byte) (int, error) {
+	n, err := r.Reader.Read(p)
+	r.bytesRead += n
+	return n, err
+}
+
+func (r *countingReadCloser) Close() error { return nil }
+
 func staticHTTPClient(status int, body string) *http.Client {
 	return staticHTTPClientWithHeaders(status, body, nil)
 }

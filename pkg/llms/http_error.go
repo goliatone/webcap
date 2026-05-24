@@ -3,6 +3,7 @@ package llms
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"sort"
 	"strconv"
@@ -98,9 +99,7 @@ func (e *ProviderHTTPError) Metadata() map[string]string {
 	if e.ErrorMessage != "" {
 		out["error_message"] = e.ErrorMessage
 	}
-	for key, value := range e.RateLimit {
-		out[key] = value
-	}
+	maps.Copy(out, e.RateLimit)
 	return out
 }
 

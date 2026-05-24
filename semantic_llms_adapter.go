@@ -88,8 +88,6 @@ func mapLLMSError(err error) error {
 			WithMetadata("provider", executionErr.Provider).
 			WithMetadata("command", executionErr.Command).
 			WithMetadata("exit_code", executionErr.ExitCode).
-			WithMetadata("stdout", executionErr.Stdout).
-			WithMetadata("stderr", executionErr.Stderr).
 			WithMetadata("timed_out", executionErr.TimedOut).
 			WithMetadata("cancelled", executionErr.Cancelled)
 	}
@@ -109,7 +107,7 @@ func semanticProviderHTTPError(err *llms.ProviderHTTPError) *Error {
 	message := semanticProviderHTTPMessage(code, err)
 	captureErr := newCaptureError(code, "semantic_llms_provider", message, err)
 	for key, value := range err.Metadata() {
-		captureErr.WithMetadata(key, value)
+		captureErr = captureErr.WithMetadata(key, value)
 	}
 	return captureErr
 }

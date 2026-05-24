@@ -39,7 +39,7 @@ func TestPrepareSemanticImagePayloadRejectsUnsupportedUnreadableAndLargeFiles(t 
 	if err := writeTestPNG(pngPath, []color.NRGBA{{A: 255}}); err != nil {
 		t.Fatalf("write png: %v", err)
 	}
-	if _, err := prepareSemanticImagePayload(pngPath, "current", semanticImagePrepareOptions{MaxRawBytes: 1}); err == nil {
+	if _, err := prepareSemanticImagePayload(pngPath, "current", semanticImagePrepareOptions{MaxRawBytes: 1, ResizeImages: true, TempDir: dir}); err == nil {
 		t.Fatal("expected max image byte error")
 	}
 }
@@ -56,6 +56,7 @@ func TestPrepareSemanticImagePayloadResizesProviderCopy(t *testing.T) {
 	}
 	tempDir := t.TempDir()
 	payload, err := prepareSemanticImagePayload(path, "current", semanticImagePrepareOptions{
+		MaxRawBytes:  1_000_000,
 		MaxLongEdge:  20,
 		MaxPixels:    400,
 		ResizeImages: true,

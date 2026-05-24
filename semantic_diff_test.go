@@ -4,7 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"image"
 	"image/color"
+	"image/png"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -275,6 +279,96 @@ func TestServiceSemanticDiffRejectsCombinedEncodedBudget(t *testing.T) {
 	}
 }
 
+func TestServiceSemanticDiffResizesForCombinedEncodedBudget(t *testing.T) {
+	dir := t.TempDir()
+	currentPath := filepath.Join(dir, "current.png")
+	referencePath := filepath.Join(dir, "reference.png")
+	if err := writeSemanticNoisePNG(currentPath, 80, 80); err != nil {
+		t.Fatalf("write current: %v", err)
+	}
+	if err := writeSemanticNoisePNG(referencePath, 80, 80); err != nil {
+		t.Fatalf("write reference: %v", err)
+	}
+	const combinedBudget = int64(3000)
+	provider := &fakeSemanticProvider{
+		resp: SemanticProviderResponse{RawText: `{"summary":"ok","verdict":"no_meaningful_change","severity":"info"}`},
+		onCompare: func(req SemanticProviderRequest) {
+			var combined int64
+			for _, image := range req.Images {
+				combined += int64(len(image.Base64Data))
+			}
+			if combined > combinedBudget {
+				t.Fatalf("provider received oversized encoded images: %d > %d", combined, combinedBudget)
+			}
+			if req.Images[0].Path == currentPath {
+				t.Fatalf("expected current image to use a provider copy")
+			}
+		},
+	}
+	service := NewServiceWithOptions(nil, Options{SemanticDiff: SemanticDiffOptions{
+		DefaultProvider:              "fake",
+		Providers:                    map[string]SemanticDiffProvider{"fake": provider},
+		ResizeImages:                 true,
+		MaxCombinedEncodedImageBytes: combinedBudget,
+	}})
+	result, err := service.SemanticDiff(context.Background(), SemanticDiffRequest{
+		CurrentPath:   currentPath,
+		ReferencePath: referencePath,
+		MetadataPath:  filepath.Join(dir, "semantic.json"),
+	})
+	if err != nil {
+		t.Fatalf("SemanticDiff returned error: %v", err)
+	}
+	if len(result.ImageMetadata) != 2 || !strings.Contains(result.ImageMetadata[0].ResizeReason, "max_combined_encoded_image_bytes") {
+		t.Fatalf("expected combined budget resize metadata, got %#v", result.ImageMetadata)
+	}
+}
+
+func TestServiceSemanticDiffResizesForOpenAIRequestBodyBudget(t *testing.T) {
+	dir := t.TempDir()
+	currentPath := filepath.Join(dir, "current.png")
+	referencePath := filepath.Join(dir, "reference.png")
+	if err := writeSemanticNoisePNG(currentPath, 80, 80); err != nil {
+		t.Fatalf("write current: %v", err)
+	}
+	if err := writeSemanticNoisePNG(referencePath, 80, 80); err != nil {
+		t.Fatalf("write reference: %v", err)
+	}
+	const bodyBudget = int64(4000)
+	var sawRequest bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawRequest = true
+		if r.ContentLength > bodyBudget {
+			t.Fatalf("provider received oversized request body: %d > %d", r.ContentLength, bodyBudget)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"model":"gpt-test","output":[{"type":"message","content":[{"type":"output_text","text":"{\"summary\":\"ok\",\"verdict\":\"no_meaningful_change\",\"severity\":\"info\"}"}]}]}`))
+	}))
+	defer server.Close()
+	service := NewServiceWithOptions(nil, Options{SemanticDiff: SemanticDiffOptions{
+		DefaultProvider:     "openai",
+		DefaultModels:       map[string]string{"openai": "gpt-test"},
+		CredentialResolver:  func(context.Context, string) (string, error) { return "test-key", nil },
+		OpenAIBaseURL:       server.URL,
+		ResizeImages:        true,
+		MaxRequestBodyBytes: bodyBudget,
+	}})
+	result, err := service.SemanticDiff(context.Background(), SemanticDiffRequest{
+		CurrentPath:   currentPath,
+		ReferencePath: referencePath,
+		MetadataPath:  filepath.Join(dir, "semantic.json"),
+	})
+	if err != nil {
+		t.Fatalf("SemanticDiff returned error: %v", err)
+	}
+	if !sawRequest {
+		t.Fatal("expected provider HTTP request")
+	}
+	if len(result.ImageMetadata) != 2 || !strings.Contains(result.ImageMetadata[0].ResizeReason, "max_request_body_bytes") {
+		t.Fatalf("expected request body resize metadata, got %#v", result.ImageMetadata)
+	}
+}
+
 func TestServiceSemanticDiffRedactionHookCanReplaceOrAbortImages(t *testing.T) {
 	dir := t.TempDir()
 	currentPath := filepath.Join(dir, "current.png")
@@ -355,4 +449,26 @@ func TestSemanticDiffBuiltInProviderRequiresModel(t *testing.T) {
 	if _, err := service.SemanticDiff(context.Background(), SemanticDiffRequest{CurrentPath: currentPath, ReferencePath: referencePath, Provider: "openai"}); err == nil {
 		t.Fatal("expected missing built-in provider model error")
 	}
+}
+
+func writeSemanticNoisePNG(path string, width, height int) error {
+	img := image.NewNRGBA(image.Rect(0, 0, width, height))
+	for y := range height {
+		for x := range width {
+			v := uint8((x*37 + y*91 + x*y) % 251)
+			img.SetNRGBA(x, y, color.NRGBA{R: v, G: v ^ 0x55, B: v ^ 0xaa, A: 255})
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	file, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	if err := png.Encode(file, img); err != nil {
+		_ = file.Close()
+		return err
+	}
+	return file.Close()
 }

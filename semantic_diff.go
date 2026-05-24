@@ -62,8 +62,14 @@ func (s *Service) SemanticDiff(ctx context.Context, req SemanticDiffRequest) (Se
 		MaxProviderBytes: options.MaxProviderImageBytes,
 		MaxLongEdge:      options.MaxImageLongEdge,
 		MaxPixels:        options.MaxImagePixels,
+		MaxEncodedBytes:  options.MaxEncodedImageBytes,
 		ResizeImages:     options.ResizeImages,
 		TempDir:          tempDir,
+	}
+
+	prompt, promptMetadata, err := buildSemanticDiffPrompt(normalized)
+	if err != nil {
+		return SemanticDiffResult{}, err
 	}
 
 	currentPath, err := applySemanticImageRedactor(ctx, options.RedactImage, "current", normalized.CurrentPath)
@@ -94,11 +100,17 @@ func (s *Service) SemanticDiff(ctx context.Context, req SemanticDiffRequest) (Se
 		}
 		images = append(images, diffImage)
 	}
-	if err := validateSemanticEncodedBudgets(images, options.MaxEncodedImageBytes, options.MaxCombinedEncodedImageBytes); err != nil {
-		return SemanticDiffResult{}, err
-	}
-
-	prompt, promptMetadata, err := buildSemanticDiffPrompt(normalized)
+	images, err = satisfySemanticProviderBudgets(images, semanticProviderBudgetOptions{
+		Image:                        imageOptions,
+		Provider:                     normalized.Provider,
+		Model:                        normalized.Model,
+		Prompt:                       prompt,
+		MaxOutputTokens:              normalized.MaxOutputTokens,
+		StructuredJSON:               true,
+		MaxEncodedImageBytes:         options.MaxEncodedImageBytes,
+		MaxCombinedEncodedImageBytes: options.MaxCombinedEncodedImageBytes,
+		MaxRequestBodyBytes:          options.MaxRequestBodyBytes,
+	})
 	if err != nil {
 		return SemanticDiffResult{}, err
 	}

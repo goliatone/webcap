@@ -31,8 +31,10 @@ type semanticImagePrepareOptions struct {
 	MaxProviderBytes int64
 	MaxLongEdge      int
 	MaxPixels        int64
+	MaxEncodedBytes  int64
 	ResizeImages     bool
 	TempDir          string
+	ScaleFactor      float64
 }
 
 func prepareSemanticImagePayload(path, role string, options semanticImagePrepareOptions) (SemanticImagePayload, error) {
@@ -49,6 +51,13 @@ func prepareSemanticImagePayload(path, role string, options semanticImagePrepare
 	}
 	if info.IsDir() {
 		return SemanticImagePayload{}, newCaptureError(CodeValidation, "prepare_semantic_image", "semantic diff image path must be a file", nil)
+	}
+	if info.Size() > options.MaxRawBytes {
+		return SemanticImagePayload{}, semanticImageBudgetError("max_raw_bytes", SemanticImageMetadata{
+			Role:             strings.TrimSpace(role),
+			OriginalPath:     path,
+			OriginalByteSize: info.Size(),
+		}, options)
 	}
 	mimeType, err := semanticImageMIMEType(path)
 	if err != nil {
@@ -81,31 +90,12 @@ func prepareSemanticImagePayload(path, role string, options semanticImagePrepare
 	}
 	resizeReason := semanticResizeReason(metadata, options)
 	if resizeReason != "" {
-		if !options.ResizeImages {
-			return SemanticImagePayload{}, semanticImageBudgetError(resizeReason, metadata, options)
+		path, payload, metadata, err = prepareSemanticImageProviderCopy(path, role, mimeType, payload, metadata, options, resizeReason)
+		if err != nil {
+			return SemanticImagePayload{}, err
 		}
-		resized, resizeErr := resizeSemanticImage(payload, mimeType, options)
-		if resizeErr != nil {
-			return SemanticImagePayload{}, wrapCaptureError("resize_semantic_image", resizeErr)
-		}
-		payload = resized
-		width, height, _ = semanticImageDimensions(payload)
-		metadata.ProviderByteSize = int64(len(payload))
-		metadata.ProviderWidth = width
-		metadata.ProviderHeight = height
-		metadata.ResizeReason = resizeReason
-		if still := semanticResizeReason(metadata, options); still != "" {
-			return SemanticImagePayload{}, semanticImageBudgetError(still, metadata, options)
-		}
-		if options.TempDir == "" {
-			return SemanticImagePayload{}, newCaptureError(CodeValidation, "prepare_semantic_image", "semantic image resize requires a temporary directory", nil)
-		}
-		copyPath := filepath.Join(options.TempDir, semanticProviderCopyName(role, path, mimeType))
-		if err := os.WriteFile(copyPath, payload, 0o600); err != nil {
-			return SemanticImagePayload{}, wrapCaptureError("write_semantic_provider_image", err)
-		}
-		metadata.ProviderPath = copyPath
-		path = copyPath
+		width = metadata.ProviderWidth
+		height = metadata.ProviderHeight
 	}
 	return SemanticImagePayload{
 		Role:       strings.TrimSpace(role),
@@ -117,6 +107,33 @@ func prepareSemanticImagePayload(path, role string, options semanticImagePrepare
 		Height:     height,
 		Metadata:   metadata,
 	}, nil
+}
+
+func prepareSemanticImageProviderCopy(path, role, mimeType string, payload []byte, metadata SemanticImageMetadata, options semanticImagePrepareOptions, resizeReason string) (string, []byte, SemanticImageMetadata, error) {
+	if !options.ResizeImages {
+		return "", nil, SemanticImageMetadata{}, semanticImageBudgetError(resizeReason, metadata, options)
+	}
+	resized, err := resizeSemanticImage(payload, mimeType, options)
+	if err != nil {
+		return "", nil, SemanticImageMetadata{}, wrapCaptureError("resize_semantic_image", err)
+	}
+	width, height, _ := semanticImageDimensions(resized)
+	metadata.ProviderByteSize = int64(len(resized))
+	metadata.ProviderWidth = width
+	metadata.ProviderHeight = height
+	metadata.ResizeReason = resizeReason
+	if still := semanticResizeReason(metadata, options); still != "" {
+		return "", nil, SemanticImageMetadata{}, semanticImageBudgetError(still, metadata, options)
+	}
+	if options.TempDir == "" {
+		return "", nil, SemanticImageMetadata{}, newCaptureError(CodeValidation, "prepare_semantic_image", "semantic image resize requires a temporary directory", nil)
+	}
+	copyPath := filepath.Join(options.TempDir, semanticProviderCopyName(role, path, mimeType))
+	if err := os.WriteFile(copyPath, resized, 0o600); err != nil {
+		return "", nil, SemanticImageMetadata{}, wrapCaptureError("write_semantic_provider_image", err)
+	}
+	metadata.ProviderPath = copyPath
+	return copyPath, resized, metadata, nil
 }
 
 func readSemanticImageFile(path string) ([]byte, error) {
@@ -166,9 +183,6 @@ func semanticImageDimensions(payload []byte) (int, int, error) {
 }
 
 func semanticResizeReason(metadata SemanticImageMetadata, options semanticImagePrepareOptions) string {
-	if options.MaxRawBytes > 0 && metadata.ProviderByteSize > options.MaxRawBytes {
-		return "max_raw_bytes"
-	}
 	if options.MaxProviderBytes > 0 && metadata.ProviderByteSize > options.MaxProviderBytes {
 		return "max_provider_bytes"
 	}
@@ -182,6 +196,9 @@ func semanticResizeReason(metadata SemanticImageMetadata, options semanticImageP
 	if options.MaxPixels > 0 && int64(metadata.ProviderWidth)*int64(metadata.ProviderHeight) > options.MaxPixels {
 		return "max_pixels"
 	}
+	if options.MaxEncodedBytes > 0 && int64(base64.StdEncoding.EncodedLen(int(metadata.ProviderByteSize))) > options.MaxEncodedBytes {
+		return "max_encoded_image_bytes"
+	}
 	return ""
 }
 
@@ -189,6 +206,9 @@ func semanticImageBudgetError(limitName string, metadata SemanticImageMetadata, 
 	actual := metadata.ProviderByteSize
 	limit := options.MaxRawBytes
 	switch limitName {
+	case "max_raw_bytes":
+		actual = metadata.OriginalByteSize
+		limit = options.MaxRawBytes
 	case "max_provider_bytes":
 		limit = options.MaxProviderBytes
 	case "max_long_edge":
@@ -201,6 +221,9 @@ func semanticImageBudgetError(limitName string, metadata SemanticImageMetadata, 
 	case "max_pixels":
 		actual = int64(metadata.ProviderWidth) * int64(metadata.ProviderHeight)
 		limit = options.MaxPixels
+	case "max_encoded_image_bytes":
+		actual = int64(base64.StdEncoding.EncodedLen(int(metadata.ProviderByteSize)))
+		limit = options.MaxEncodedBytes
 	}
 	return newCaptureError(CodeProviderPayloadTooLarge, "prepare_semantic_image", fmt.Sprintf("semantic diff image exceeds %s budget", limitName), nil).
 		WithMetadata("limit_name", limitName).
@@ -223,6 +246,9 @@ func semanticImageLimits(options semanticImagePrepareOptions) map[string]any {
 	if options.MaxPixels > 0 {
 		limits["max_pixels"] = options.MaxPixels
 	}
+	if options.MaxEncodedBytes > 0 {
+		limits["max_encoded_image_bytes"] = options.MaxEncodedBytes
+	}
 	if len(limits) == 0 {
 		return nil
 	}
@@ -236,7 +262,7 @@ func resizeSemanticImage(payload []byte, mimeType string, options semanticImageP
 	}
 	width := src.Bounds().Dx()
 	height := src.Bounds().Dy()
-	for i := 0; i < 8; i++ {
+	for range 8 {
 		targetWidth, targetHeight := semanticResizeDimensions(width, height, int64(len(payload)), options)
 		if targetWidth >= width && targetHeight >= height {
 			targetWidth = maxInt(1, width*85/100)
@@ -296,6 +322,15 @@ func semanticResizeDimensions(width, height int, byteSize int64, options semanti
 	if byteLimit > 0 && byteSize > byteLimit {
 		scale = minFloat(scale, sqrtFloat(float64(byteLimit)/float64(byteSize))*0.95)
 	}
+	if options.MaxEncodedBytes > 0 {
+		encodedBytes := int64(base64.StdEncoding.EncodedLen(int(byteSize)))
+		if encodedBytes > options.MaxEncodedBytes {
+			scale = minFloat(scale, sqrtFloat(float64(options.MaxEncodedBytes)/float64(encodedBytes))*0.95)
+		}
+	}
+	if options.ScaleFactor > 0 && options.ScaleFactor < 1 {
+		scale = minFloat(scale, options.ScaleFactor)
+	}
 	return maxInt(1, int(float64(width)*scale)), maxInt(1, int(float64(height)*scale))
 }
 
@@ -331,7 +366,7 @@ func sqrtFloat(value float64) float64 {
 		return 1
 	}
 	x := value
-	for i := 0; i < 8; i++ {
+	for range 8 {
 		x = 0.5 * (x + value/x)
 	}
 	return x

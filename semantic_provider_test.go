@@ -3,6 +3,7 @@ package webcap
 import (
 	"context"
 	"errors"
+	"fmt"
 	"image/color"
 	"io"
 	"net/http"
@@ -127,6 +128,7 @@ func TestLLMSSemanticDiffProviderMapsCodexInvalidSchema(t *testing.T) {
 			Provider: "codex-cli",
 			Command:  "codex",
 			ExitCode: 1,
+			Stdout:   "sensitive stdout",
 			Stderr:   "invalid_json_schema: additionalProperties must be false",
 		},
 	})
@@ -134,6 +136,42 @@ func TestLLMSSemanticDiffProviderMapsCodexInvalidSchema(t *testing.T) {
 	var captureErr *Error
 	if !errors.As(err, &captureErr) || captureErr.Code != CodeProviderInvalidRequest {
 		t.Fatalf("expected provider invalid request error, got %v %#v", err, captureErr)
+	}
+	if _, ok := captureErr.Metadata["stdout"]; ok {
+		t.Fatalf("stdout should not be exposed in metadata: %#v", captureErr.Metadata)
+	}
+	if _, ok := captureErr.Metadata["stderr"]; ok {
+		t.Fatalf("stderr should not be exposed in metadata: %#v", captureErr.Metadata)
+	}
+	if strings.Contains(fmt.Sprint(captureErr.Metadata), "sensitive stdout") {
+		t.Fatalf("execution metadata leaked provider output: %#v", captureErr.Metadata)
+	}
+}
+
+func TestLLMSSemanticDiffProviderOmitsExecutionOutputMetadata(t *testing.T) {
+	adapter := NewLLMSSemanticDiffProvider(&recordingLLMSProvider{
+		name: "codex-cli",
+		err: &llms.ExecutionError{
+			Provider: "codex-cli",
+			Command:  "codex",
+			ExitCode: 2,
+			Stdout:   "sensitive stdout payload",
+			Stderr:   "sensitive stderr payload",
+		},
+	})
+	_, err := adapter.CompareImages(context.Background(), SemanticProviderRequest{Provider: "codex-cli"})
+	var captureErr *Error
+	if !errors.As(err, &captureErr) || captureErr.Code != CodeProviderExecutionFailed {
+		t.Fatalf("expected provider execution error, got %v %#v", err, captureErr)
+	}
+	if _, ok := captureErr.Metadata["stdout"]; ok {
+		t.Fatalf("stdout should not be exposed in metadata: %#v", captureErr.Metadata)
+	}
+	if _, ok := captureErr.Metadata["stderr"]; ok {
+		t.Fatalf("stderr should not be exposed in metadata: %#v", captureErr.Metadata)
+	}
+	if strings.Contains(fmt.Sprint(captureErr.Metadata), "sensitive") {
+		t.Fatalf("execution metadata leaked provider output: %#v", captureErr.Metadata)
 	}
 }
 

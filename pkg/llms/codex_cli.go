@@ -185,7 +185,41 @@ func (p *CodexCLIProvider) args(req Request, tempDir string) ([]string, string, 
 
 func writeCodexSchema(tempDir string) (string, error) {
 	path := filepath.Join(tempDir, "semantic-output.schema.json")
-	schema := []byte(`{"type":"object","additionalProperties":true}` + "\n")
+	schema := []byte(`{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "verdict", "severity", "differences"],
+  "properties": {
+    "summary": { "type": "string" },
+    "verdict": {
+      "type": "string",
+      "enum": ["no_meaningful_change", "needs_review", "regression", "improvement", "inconclusive"]
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["info", "minor", "major", "blocking"]
+    },
+    "differences": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["area", "description", "severity", "evidence", "recommendation"],
+        "properties": {
+          "area": { "type": "string" },
+          "description": { "type": "string" },
+          "severity": {
+            "type": "string",
+            "enum": ["info", "minor", "major", "blocking"]
+          },
+          "evidence": { "type": "string" },
+          "recommendation": { "type": ["string", "null"] }
+        }
+      }
+    }
+  }
+}
+`)
 	if err := os.WriteFile(path, schema, 0o600); err != nil {
 		return "", fmt.Errorf("write codex output schema: %w", err)
 	}

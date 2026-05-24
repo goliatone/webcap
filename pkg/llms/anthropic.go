@@ -39,7 +39,7 @@ func (p *AnthropicProvider) CompareImages(ctx context.Context, req Request) (Res
 	if err != nil {
 		return Response{}, err
 	}
-	payload, _, err := postJSON(ctx, p.httpClient, p.baseURL, "", map[string]string{
+	payload, _, err := postJSON(ctx, p.httpClient, p.Name(), p.baseURL, "", map[string]string{
 		"x-api-key":         key,
 		"anthropic-version": "2023-06-01",
 	}, body)
@@ -78,7 +78,19 @@ func BuildAnthropicRequest(req Request) ([]byte, error) {
 			"content": content,
 		}},
 	}
-	return json.Marshal(body)
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	if req.MaxRequestBodyBytes > 0 && int64(len(payload)) > req.MaxRequestBodyBytes {
+		return nil, &PayloadBudgetError{
+			Provider:    ProviderAnthropic,
+			LimitName:   "max_request_body_bytes",
+			LimitValue:  req.MaxRequestBodyBytes,
+			ActualValue: int64(len(payload)),
+		}
+	}
+	return payload, nil
 }
 
 type anthropicResponsePayload struct {

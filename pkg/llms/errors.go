@@ -17,6 +17,24 @@ type ExecutionError struct {
 	Err       error
 }
 
+type PayloadBudgetError struct {
+	Provider    string
+	LimitName   string
+	LimitValue  int64
+	ActualValue int64
+}
+
+func (e *PayloadBudgetError) Error() string {
+	if e == nil {
+		return ""
+	}
+	provider := strings.TrimSpace(e.Provider)
+	if provider == "" {
+		provider = "provider"
+	}
+	return fmt.Sprintf("%s request exceeds %s budget: %d > %d", provider, e.LimitName, e.ActualValue, e.LimitValue)
+}
+
 func (e *ExecutionError) Error() string {
 	if e == nil {
 		return ""

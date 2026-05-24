@@ -8,7 +8,7 @@ import (
 	"net/http"
 )
 
-func postJSON(ctx context.Context, client *http.Client, url, apiKey string, headers map[string]string, body []byte) ([]byte, int, error) {
+func postJSON(ctx context.Context, client *http.Client, provider, url, apiKey string, headers map[string]string, body []byte) ([]byte, int, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, 0, fmt.Errorf("build provider request: %w", err)
@@ -32,7 +32,7 @@ func postJSON(ctx context.Context, client *http.Client, url, apiKey string, head
 		return nil, resp.StatusCode, fmt.Errorf("read provider response: %w", readErr)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, resp.StatusCode, fmt.Errorf("provider returned HTTP %d", resp.StatusCode)
+		return nil, resp.StatusCode, NewProviderHTTPError(provider, resp, payload)
 	}
 	return payload, resp.StatusCode, nil
 }

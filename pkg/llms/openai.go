@@ -39,7 +39,7 @@ func (p *OpenAIProvider) CompareImages(ctx context.Context, req Request) (Respon
 	if err != nil {
 		return Response{}, err
 	}
-	payload, _, err := postJSON(ctx, p.httpClient, p.baseURL, key, nil, body)
+	payload, _, err := postJSON(ctx, p.httpClient, p.Name(), p.baseURL, key, nil, body)
 	if err != nil {
 		return Response{}, err
 	}
@@ -77,7 +77,19 @@ func BuildOpenAIRequest(req Request) ([]byte, error) {
 			"format": map[string]any{"type": "json_object"},
 		}
 	}
-	return json.Marshal(body)
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	if req.MaxRequestBodyBytes > 0 && int64(len(payload)) > req.MaxRequestBodyBytes {
+		return nil, &PayloadBudgetError{
+			Provider:    ProviderOpenAI,
+			LimitName:   "max_request_body_bytes",
+			LimitValue:  req.MaxRequestBodyBytes,
+			ActualValue: int64(len(payload)),
+		}
+	}
+	return payload, nil
 }
 
 type openAIResponsePayload struct {

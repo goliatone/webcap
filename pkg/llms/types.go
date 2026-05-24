@@ -23,14 +23,15 @@ type Provider interface {
 }
 
 type Request struct {
-	Provider        string
-	Model           string
-	Prompt          string
-	Images          []Image
-	Timeout         time.Duration
-	MaxOutputTokens int
-	StructuredJSON  bool
-	Metadata        map[string]string
+	Provider            string
+	Model               string
+	Prompt              string
+	Images              []Image
+	Timeout             time.Duration
+	MaxOutputTokens     int
+	StructuredJSON      bool
+	MaxRequestBodyBytes int64
+	Metadata            map[string]string
 }
 
 type Image struct {

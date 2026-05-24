@@ -21,19 +21,26 @@ type Options struct {
 }
 
 type SemanticDiffOptions struct {
-	Providers           map[string]SemanticDiffProvider
-	CredentialResolver  SemanticCredentialResolver
-	RedactImage         SemanticImageRedactor
-	HTTPClient          *http.Client
-	DefaultProvider     string
-	DefaultModels       map[string]string
-	DefaultTimeout      time.Duration
-	MaxImageBytes       int64
-	MaxOutputTokens     int
-	PersistRawResponses bool
-	LLMs                llms.Options
-	OpenAIBaseURL       string
-	AnthropicBaseURL    string
+	Providers                    map[string]SemanticDiffProvider
+	CredentialResolver           SemanticCredentialResolver
+	RedactImage                  SemanticImageRedactor
+	HTTPClient                   *http.Client
+	DefaultProvider              string
+	DefaultModels                map[string]string
+	DefaultTimeout               time.Duration
+	MaxImageBytes                int64
+	MaxProviderImageBytes        int64
+	MaxImageLongEdge             int
+	MaxImagePixels               int64
+	MaxEncodedImageBytes         int64
+	MaxCombinedEncodedImageBytes int64
+	MaxRequestBodyBytes          int64
+	ResizeImages                 bool
+	MaxOutputTokens              int
+	PersistRawResponses          bool
+	LLMs                         llms.Options
+	OpenAIBaseURL                string
+	AnthropicBaseURL             string
 }
 
 type WorkflowOptions struct {

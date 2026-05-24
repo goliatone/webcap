@@ -288,8 +288,9 @@ type CaptureTiming struct {
 }
 
 type CaptureWarning struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	Code     string         `json:"code"`
+	Message  string         `json:"message"`
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 type CaptureNormalization struct {
@@ -739,6 +740,20 @@ func cloneWarnings(warnings []CaptureWarning) []CaptureWarning {
 		return nil
 	}
 	out := make([]CaptureWarning, len(warnings))
-	copy(out, warnings)
+	for i, warning := range warnings {
+		out[i] = warning
+		out[i].Metadata = cloneAnyMap(warning.Metadata)
+	}
+	return out
+}
+
+func cloneAnyMap(values map[string]any) map[string]any {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(values))
+	for key, value := range values {
+		out[key] = value
+	}
 	return out
 }

@@ -27,12 +27,16 @@ func postJSON(ctx context.Context, client *http.Client, provider, url, apiKey st
 	defer func() {
 		_ = resp.Body.Close()
 	}()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		payload, readErr := io.ReadAll(io.LimitReader(resp.Body, providerHTTPBodyLimit+1))
+		if readErr != nil {
+			return nil, resp.StatusCode, fmt.Errorf("read provider response: %w", readErr)
+		}
+		return nil, resp.StatusCode, NewProviderHTTPError(provider, resp, payload)
+	}
 	payload, readErr := io.ReadAll(resp.Body)
 	if readErr != nil {
 		return nil, resp.StatusCode, fmt.Errorf("read provider response: %w", readErr)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, resp.StatusCode, NewProviderHTTPError(provider, resp, payload)
 	}
 	return payload, resp.StatusCode, nil
 }

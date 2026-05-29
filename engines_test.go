@@ -129,6 +129,13 @@ func TestURLGuardVerification(t *testing.T) {
 	if err := verifyURLGuards(CaptureGuards{ExpectURL: "/admin", FailOnURL: []string{"/login"}}, "http://localhost:3000/admin"); err != nil {
 		t.Fatalf("verifyURLGuards returned error: %v", err)
 	}
+	outcomes, err := evaluateURLGuardOutcomes(CaptureGuards{ExpectURL: "/admin", FailOnURL: []string{"/login"}}, "http://localhost:3000/admin")
+	if err != nil {
+		t.Fatalf("evaluateURLGuardOutcomes returned error: %v", err)
+	}
+	if len(outcomes) != 2 || outcomes[0].Kind != "expect_url" || !outcomes[0].Matched || outcomes[0].Status != "passed" || outcomes[1].Matched || outcomes[1].Status != "passed" {
+		t.Fatalf("unexpected URL guard outcomes: %#v", outcomes)
+	}
 	err := verifyURLGuards(CaptureGuards{ExpectURL: "/admin"}, "http://localhost:3000/login")
 	var captureErr *Error
 	if !errors.As(err, &captureErr) || captureErr.Operation != "verify_url_guard" || captureErr.Metadata["expect_url"] != "/admin" {
@@ -137,6 +144,17 @@ func TestURLGuardVerification(t *testing.T) {
 	err = verifyURLGuards(CaptureGuards{FailOnURL: []string{"/login"}}, "http://localhost:3000/login")
 	if !errors.As(err, &captureErr) || captureErr.Operation != "verify_url_guard" || captureErr.Metadata["fail_on_url"] != "/login" {
 		t.Fatalf("unexpected fail_on_url guard error: %+v", err)
+	}
+}
+
+func TestSelectorGuardOutcomes(t *testing.T) {
+	outcomes := selectorGuardOutcomes([]string{"form.login", ".unauthorized"}, "http://localhost:3000/admin", "")
+	if len(outcomes) != 2 || outcomes[0].Matched || outcomes[0].Status != "passed" || outcomes[1].Matched || outcomes[1].Status != "passed" {
+		t.Fatalf("unexpected passing selector outcomes: %#v", outcomes)
+	}
+	outcomes = selectorGuardOutcomes([]string{"form.login", ".unauthorized"}, "http://localhost:3000/login", ".unauthorized")
+	if len(outcomes) != 2 || outcomes[1].Kind != "fail_on_selector" || !outcomes[1].Matched || outcomes[1].Status != "failed" {
+		t.Fatalf("unexpected failing selector outcomes: %#v", outcomes)
 	}
 }
 

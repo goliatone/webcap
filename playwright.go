@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type PlaywrightOptions struct {
@@ -38,6 +39,7 @@ type playwrightBridgeResponse struct {
 	Browser     BrowserInfo      `json:"browser"`
 	Timing      CaptureTiming    `json:"timing"`
 	Warnings    []CaptureWarning `json:"warnings,omitempty"`
+	Guards      []GuardOutcome   `json:"guards,omitempty"`
 	BytesBase64 string           `json:"bytes_base64"`
 }
 
@@ -97,7 +99,14 @@ func (e *PlaywrightEngine) Capture(ctx context.Context, req CaptureRequest) (Eng
 			WithMetadata("guidance", "use the chromium engine for tiled captures or omit oversize_policy=tile")
 	}
 
-	payload := playwrightBridgeRequest{Request: normalized}
+	bridgeRequest := normalized
+	authCookies, err := resolveCaptureAuthCookies(normalized, time.Now().UTC())
+	if err != nil {
+		return EngineResult{}, err
+	}
+	bridgeRequest.Auth.Cookies = authCookies
+	bridgeRequest.Auth.CookieJar = ""
+	payload := playwrightBridgeRequest{Request: bridgeRequest}
 	payload.Options.BrowserName = e.opts.BrowserName
 	payload.Options.BrowserPath = strings.TrimSpace(e.opts.BrowserPath)
 	payload.Options.Headless = e.opts.Headless
@@ -134,6 +143,7 @@ func (e *PlaywrightEngine) Capture(ctx context.Context, req CaptureRequest) (Eng
 		Browser:  response.Browser,
 		Timing:   response.Timing,
 		Warnings: cloneWarnings(response.Warnings),
+		Guards:   cloneGuardOutcomes(response.Guards),
 	}, nil
 }
 

@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/chromedp/cdproto/browser"
+	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/emulation"
+	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
@@ -79,6 +81,9 @@ func (e *ChromiumEngine) Capture(ctx context.Context, req CaptureRequest) (Engin
 	if err := chromedp.Run(timeoutCtx, preNavigationActions(normalized)...); err != nil {
 		return EngineResult{}, wrapCaptureError("browser_setup", err)
 	}
+	if err := chromedp.Run(timeoutCtx, chromiumAuthActions(normalized, e.now())...); err != nil {
+		return EngineResult{}, wrapCaptureError("browser_setup", err)
+	}
 	if err := runChromiumScript(timeoutCtx, "before_navigate", normalized.BeforeNavigateJS); err != nil {
 		return EngineResult{}, err
 	}
@@ -92,6 +97,14 @@ func (e *ChromiumEngine) Capture(ctx context.Context, req CaptureRequest) (Engin
 		return EngineResult{}, wrapCaptureError("navigate", err)
 	}
 	engineResult.Timing.NavigationCompletedAt = e.now()
+	finalURL, err := currentChromiumURL(timeoutCtx)
+	if err != nil {
+		return EngineResult{}, err
+	}
+	engineResult.Artifact.URL = finalURL
+	if err := verifyURLGuards(normalized.Guards, finalURL); err != nil {
+		return EngineResult{}, err
+	}
 
 	if err := runChromiumScript(timeoutCtx, "after_navigate", normalized.AfterNavigateJS); err != nil {
 		return EngineResult{}, err
@@ -102,6 +115,21 @@ func (e *ChromiumEngine) Capture(ctx context.Context, req CaptureRequest) (Engin
 	if err := runChromiumScript(timeoutCtx, "before_capture", normalized.BeforeCaptureJS); err != nil {
 		return EngineResult{}, err
 	}
+	finalURL, err = currentChromiumURL(timeoutCtx)
+	if err != nil {
+		return EngineResult{}, err
+	}
+	engineResult.Artifact.URL = finalURL
+	urlGuardOutcomes, err := evaluateURLGuardOutcomes(normalized.Guards, finalURL)
+	if err != nil {
+		return EngineResult{}, err
+	}
+	engineResult.Guards = append(engineResult.Guards, urlGuardOutcomes...)
+	selectorGuardOutcomes, err := evaluateChromiumSelectorGuardOutcomes(timeoutCtx, normalized.Guards, finalURL)
+	if err != nil {
+		return EngineResult{}, err
+	}
+	engineResult.Guards = append(engineResult.Guards, selectorGuardOutcomes...)
 	engineResult.Timing.ReadyAt = e.now()
 
 	payload, bounds, matchCount, tiling, err := captureChromiumScreenshot(timeoutCtx, normalized)
@@ -187,6 +215,78 @@ func preNavigationActions(req CaptureRequest) []chromedp.Action {
 		actions = append(actions, addDisableAnimationsScript())
 	}
 	return actions
+}
+
+func chromiumAuthActions(req CaptureRequest, now time.Time) []chromedp.Action {
+	if req.Auth.IsZero() {
+		return nil
+	}
+	return []chromedp.Action{
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			if err := network.Enable().Do(ctx); err != nil {
+				return err
+			}
+			if len(req.Auth.Headers) > 0 {
+				headers := network.Headers{}
+				for _, header := range req.Auth.Headers {
+					headers[header.Name] = header.Value
+				}
+				if err := network.SetExtraHTTPHeaders(headers).Do(ctx); err != nil {
+					return err
+				}
+			}
+			storageCookies, err := resolveChromiumStorageStateCookies(req)
+			if err != nil {
+				return err
+			}
+			authCookies, err := resolveCaptureAuthCookies(req, now)
+			if err != nil {
+				return err
+			}
+			params := chromiumCookieParams(req.URL, append(storageCookies, authCookies...))
+			if len(params) > 0 {
+				if err := network.SetCookies(params).Do(ctx); err != nil {
+					return err
+				}
+			}
+			return nil
+		}),
+	}
+}
+
+func chromiumCookieParams(targetURL string, cookies []CaptureCookie) []*network.CookieParam {
+	cookies = normalizeCaptureCookies(cookies)
+	params := make([]*network.CookieParam, 0, len(cookies))
+	for _, cookie := range cookies {
+		param := &network.CookieParam{
+			Name:     cookie.Name,
+			Value:    cookie.Value,
+			Path:     firstNonEmpty(cookie.Path, "/"),
+			Secure:   cookie.Secure,
+			HTTPOnly: cookie.HTTPOnly,
+		}
+		if cookie.Domain != "" && !cookie.HostOnly {
+			param.Domain = cookie.Domain
+		} else {
+			param.URL = cookieURLForTarget(targetURL, cookie)
+		}
+		if cookie.SameSite != "" {
+			switch normalizeSameSite(cookie.SameSite) {
+			case "Strict":
+				param.SameSite = network.CookieSameSiteStrict
+			case "Lax":
+				param.SameSite = network.CookieSameSiteLax
+			case "None":
+				param.SameSite = network.CookieSameSiteNone
+			}
+		}
+		if cookie.Expires > 0 {
+			expires := cdp.TimeSinceEpoch(time.Unix(cookie.Expires, 0).UTC())
+			param.Expires = &expires
+		}
+		params = append(params, param)
+	}
+	return params
 }
 
 func chromedpEmulateReducedMotion() chromedp.Action {

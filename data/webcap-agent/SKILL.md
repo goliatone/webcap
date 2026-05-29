@@ -25,6 +25,10 @@ Plain `webcap shot <url>` captures the full page by default. Add `--visible` whe
 
 For very tall full-page or selector targets, keep the default fail-fast behavior unless tile artifacts are acceptable. Use `--oversize tile` with explicit tile limits, and add `--tile-stitch` only when downstream comparison needs a single image.
 
+For auth-guarded pages, acquire auth outside `webcap` and pass it into the capture. Prefer `cookie_jar`, Playwright `storage_state`, explicit `cookies`, or safe local-only `headers` plus `expect_url` and `fail_on_url`/`fail_on_selector` guards. Do not add fixed waits to hide login redirects; guards should fail the capture when the browser lands on an auth fallback.
+
+Treat cookie values, authorization headers, and storage-state contents as secrets. `webcap` redacts them from metadata and structured output, but command lines can still be visible in shell history; prefer files or environment expansion for sensitive values.
+
 ## Artifact conventions
 
 Keep artifacts grouped by scenario or task:

@@ -69,6 +69,49 @@ webcap shot \
 
 Unstitched tiled captures write deterministic tile files and metadata. Add `--tile-stitch` only when a single image is needed for pixel or semantic comparison.
 
+## Auth-guarded capture
+
+Acquire auth state outside `webcap`, then pass it into the capture and add guards for wrong-page detection.
+
+```bash
+curl -c /tmp/admin-cookies.txt \
+  -d identifier=admin@example.test \
+  -d password="$ADMIN_PASSWORD" \
+  http://localhost:9090/admin/login
+
+webcap shot \
+  --cookie-jar /tmp/admin-cookies.txt \
+  --expect-url /admin/translations/queue \
+  --fail-on-url /admin/login \
+  --fail-on-selector 'form[action*="/login"]' \
+  --output artifacts/current/translations-queue.png \
+  http://localhost:9090/admin/translations/queue
+```
+
+For local-only header auth:
+
+```bash
+webcap shot \
+  --header "Authorization: Bearer $WEB_AUTH_TOKEN" \
+  --expect-url /admin \
+  --fail-on-url /login \
+  --output artifacts/current/admin.png \
+  http://localhost:9090/admin
+```
+
+For Playwright storage state:
+
+```bash
+webcap shot \
+  --engine playwright \
+  --storage-state .auth/admin-state.json \
+  --expect-url /admin \
+  --output artifacts/current/admin.png \
+  http://localhost:9090/admin
+```
+
+Cookie jars and explicit cookies work in Chromium and Playwright. Playwright storage state is full-fidelity only with the Playwright engine; Chromium imports cookies only and rejects origin storage. URL guards are substring matches.
+
 ## Manifest capture
 
 ```bash

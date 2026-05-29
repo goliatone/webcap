@@ -15,6 +15,12 @@ When `webcap` MCP tools are available, call them directly for capture, diff, sem
 
 Use `wait_for_function` for app-rendered state such as hydrated dashboards, Storybook iframes, and route-level data loading. MCP `capture_page` and `capture_section` accept `wait_for_function`; the CLI flag is `--wait-for-function`.
 
+## Auth-guarded captures
+
+For protected routes, use auth handoff plus guards instead of fixed waits. Provide `cookie_jar`, `storage_state`, explicit `cookies`, or safe local-only `headers` before navigation, then configure `expect_url`, `fail_on_url`, and a login/unauthorized `fail_on_selector` when available.
+
+If a capture shows a login page, treat it as an auth or guard failure. Do not accept the artifact as a valid visual baseline.
+
 ## Selector strategy
 
 Use `--selector` for a single target, `--selectors` for a union of specific regions, `--selector-all` for repeated elements, and padding when neighboring visual context matters.

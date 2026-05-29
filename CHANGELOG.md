@@ -1,5 +1,21 @@
 # Changelog
 
+# [0.7.0](https://github.com/goliatone/webcap/compare/v0.6.1...v0.7.0) - (2026-05-29)
+
+## <!-- 1 -->🐛 Bug Fixes
+
+- Remove linter suppressors ([d27a142](https://github.com/goliatone/webcap/commit/d27a142b5362c61388526d1d361646ef2a1d093c))  - (goliatone)
+- Code quality ([af81775](https://github.com/goliatone/webcap/commit/af817759e8658abdeb133c3c35ab3f0a540eae67))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- Auth guarded captures ([7596019](https://github.com/goliatone/webcap/commit/7596019f74a175b2c03f80b55c0196deadeb0f01))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update tests ([b1fb7c1](https://github.com/goliatone/webcap/commit/b1fb7c18811c992e22a3cce69940e774c01ba549))  - (goliatone)
+- Update readme ([3908a5f](https://github.com/goliatone/webcap/commit/3908a5f62dae1a40556556c6f83cb73b56f69185))  - (goliatone)
+
 # [0.6.1](https://github.com/goliatone/webcap/compare/v0.6.0...v0.6.1) - (2026-05-24)
 
 ## <!-- 1 -->🐛 Bug Fixes
@@ -7,6 +23,10 @@
 - Code quality ([6aa9d2e](https://github.com/goliatone/webcap/commit/6aa9d2e767598c98ac7f5f8033a28c88944a8af9))  - (goliatone)
 - Semantic diff implementation ([5cfe56c](https://github.com/goliatone/webcap/commit/5cfe56c7b1e8d6e78cdf02bc8ca83e1cf593bc30))  - (goliatone)
 - Semantic diff generation ([f3edee2](https://github.com/goliatone/webcap/commit/f3edee2ee0c60f57f4839fdca6526a7381ae4069))  - (goliatone)
+
+## <!-- 12 -->🔖 Releases
+
+- V0.6.1 ([146f2a7](https://github.com/goliatone/webcap/commit/146f2a7d2ae5e09b457bf7d30b5d7d98d93f0e9d))  - (goliatone)
 
 ## <!-- 16 -->➕ Add
 

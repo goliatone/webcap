@@ -134,3 +134,65 @@ shots:
 		t.Fatalf("shot tile options should override manifest defaults: %+v", requests[0].Tile)
 	}
 }
+
+func TestManifestRequestsMergeAuthAndGuards(t *testing.T) {
+	dir := t.TempDir()
+	jarPath := filepath.Join(dir, "cookies.txt")
+	statePath := filepath.Join(dir, "state.json")
+	if err := os.WriteFile(jarPath, []byte("# cookie jar\n"), 0o644); err != nil {
+		t.Fatalf("write jar: %v", err)
+	}
+	if err := os.WriteFile(statePath, []byte(`{"cookies":[],"origins":[]}`), 0o644); err != nil {
+		t.Fatalf("write state: %v", err)
+	}
+	manifestPath := filepath.Join(dir, "webcap.yaml")
+	if err := os.WriteFile(manifestPath, []byte(`
+auth:
+  cookie_jar: cookies.txt
+  headers:
+    - name: X-Test
+      value: default-secret
+  cookies:
+    - name: sid
+      value: default-cookie
+      path: /
+guards:
+  expect_url: /admin
+  fail_on_url:
+    - /login
+shots:
+  - id: queue
+    url: http://localhost:3000/admin/translations/queue
+    auth:
+      storage_state: state.json
+      headers:
+        - name: x-test
+          value: shot-secret
+    guards:
+      fail_on_selector:
+        - form[action="/login"]
+`), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	manifest, err := LoadManifest(manifestPath)
+	if err != nil {
+		t.Fatalf("LoadManifest returned error: %v", err)
+	}
+	requests, err := manifest.Requests("")
+	if err != nil {
+		t.Fatalf("Requests returned error: %v", err)
+	}
+	req := requests[0]
+	if req.Auth.CookieJar != jarPath || req.Auth.StorageState != statePath {
+		t.Fatalf("auth paths were not resolved relative to manifest: %#v", req.Auth)
+	}
+	if len(req.Auth.Headers) != 1 || req.Auth.Headers[0].Name != "x-test" || req.Auth.Headers[0].Value != "shot-secret" {
+		t.Fatalf("headers were not merged with replacement: %#v", req.Auth.Headers)
+	}
+	if len(req.Auth.Cookies) != 1 || req.Auth.Cookies[0].Name != "sid" {
+		t.Fatalf("cookies were not inherited: %#v", req.Auth.Cookies)
+	}
+	if req.Guards.ExpectURL != "/admin" || len(req.Guards.FailOnURL) != 1 || len(req.Guards.FailOnSelector) != 1 {
+		t.Fatalf("guards were not merged: %#v", req.Guards)
+	}
+}

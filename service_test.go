@@ -70,6 +70,48 @@ func TestServiceCaptureWritesNormalizationAndMetadata(t *testing.T) {
 	}
 }
 
+func TestServiceCaptureRedactsResolvedConfigMetadata(t *testing.T) {
+	engine := stubEngine{
+		result: EngineResult{
+			Artifact: CaptureArtifact{
+				Bytes:       []byte("png-bytes"),
+				ImageFormat: "png",
+				Mode:        CaptureModeFullPage,
+				URL:         "http://localhost:3000/admin",
+				Viewport:    Viewport{Width: 1440, Height: 1200, ScaleFactor: 1},
+			},
+			Browser: BrowserInfo{Engine: "stub", Headless: true},
+			Timing: CaptureTiming{
+				CapturedAt: time.Unix(12, 0).UTC(),
+			},
+		},
+	}
+	service := NewService(engine)
+	dir := t.TempDir()
+	result, err := service.Capture(context.Background(), CaptureRequest{
+		URL:        "http://localhost:3000/admin",
+		FullPage:   true,
+		OutputPath: dir + "/capture.png",
+		Auth: CaptureAuth{
+			Headers: []CaptureHeader{{Name: "Authorization", Value: "Bearer raw-token"}},
+			Cookies: []CaptureCookie{{Name: "sid", Value: "raw-cookie", Path: "/"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Capture returned error: %v", err)
+	}
+	if result.ResolvedConfig.Auth.Headers[0].Value != redactedSecretValue || result.ResolvedConfig.Auth.Cookies[0].Value != redactedSecretValue {
+		t.Fatalf("resolved config was not redacted: %#v", result.ResolvedConfig.Auth)
+	}
+	payload, err := os.ReadFile(result.MetadataPath)
+	if err != nil {
+		t.Fatalf("read metadata: %v", err)
+	}
+	if bytes.Contains(payload, []byte("raw-token")) || bytes.Contains(payload, []byte("raw-cookie")) {
+		t.Fatalf("metadata leaked auth secrets: %s", payload)
+	}
+}
+
 func TestServiceCapturePersistsTileArtifactsAndMetadata(t *testing.T) {
 	engine := stubEngine{result: tiledEngineResult([]byte("tile-a"), []byte("tile-b"))}
 	service := NewService(engine)

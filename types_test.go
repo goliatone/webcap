@@ -3,6 +3,9 @@ package webcap
 import (
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -81,6 +84,79 @@ func TestNormalizeCaptureRequestTrimsWaitForFunction(t *testing.T) {
 	}
 	if req.WaitForFunction != "" {
 		t.Fatalf("expected empty wait_for_function, got %q", req.WaitForFunction)
+	}
+}
+
+func TestNormalizeCaptureRequestAuthGuardsAndRedaction(t *testing.T) {
+	dir := t.TempDir()
+	jarPath := filepath.Join(dir, "cookies.txt")
+	statePath := filepath.Join(dir, "state.json")
+	if err := os.WriteFile(jarPath, []byte("# cookie jar\n"), 0o644); err != nil {
+		t.Fatalf("write jar: %v", err)
+	}
+	if err := os.WriteFile(statePath, []byte(`{"cookies":[],"origins":[]}`), 0o644); err != nil {
+		t.Fatalf("write state: %v", err)
+	}
+
+	req, err := NormalizeCaptureRequest(CaptureRequest{
+		URL: "http://localhost:3000/admin",
+		Auth: CaptureAuth{
+			CookieJar:    " " + jarPath + " ",
+			StorageState: " " + statePath + " ",
+			Headers: []CaptureHeader{
+				{Name: " Authorization ", Value: "Bearer raw-token"},
+				{Name: "authorization", Value: "Bearer later-token"},
+			},
+			Cookies: []CaptureCookie{
+				{Name: " sid ", Value: "raw-cookie", Path: "/", SameSite: "lax"},
+			},
+		},
+		Guards: CaptureGuards{
+			ExpectURL:      " /admin ",
+			FailOnURL:      []string{" /login ", ""},
+			FailOnSelector: []string{" form[action='/login'] "},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NormalizeCaptureRequest returned error: %v", err)
+	}
+	if req.Auth.CookieJar != jarPath || req.Auth.StorageState != statePath {
+		t.Fatalf("auth paths were not trimmed: %#v", req.Auth)
+	}
+	if len(req.Auth.Headers) != 1 || req.Auth.Headers[0].Name != "authorization" || req.Auth.Headers[0].Value != "Bearer later-token" {
+		t.Fatalf("headers were not normalized/replaced: %#v", req.Auth.Headers)
+	}
+	if len(req.Auth.Cookies) != 1 || req.Auth.Cookies[0].Name != "sid" || req.Auth.Cookies[0].SameSite != "Lax" {
+		t.Fatalf("cookies were not normalized: %#v", req.Auth.Cookies)
+	}
+	if req.Guards.ExpectURL != "/admin" || len(req.Guards.FailOnURL) != 1 || req.Guards.FailOnURL[0] != "/login" {
+		t.Fatalf("guards were not normalized: %#v", req.Guards)
+	}
+	redacted := req.Redacted()
+	encoded, err := json.Marshal(redacted)
+	if err != nil {
+		t.Fatalf("marshal redacted: %v", err)
+	}
+	if strings.Contains(string(encoded), "raw-token") || strings.Contains(string(encoded), "later-token") || strings.Contains(string(encoded), "raw-cookie") {
+		t.Fatalf("redacted request leaked secrets: %s", encoded)
+	}
+	if !strings.Contains(string(encoded), "authorization") || !strings.Contains(string(encoded), "sid") {
+		t.Fatalf("redacted request should keep safe names: %s", encoded)
+	}
+}
+
+func TestNormalizeCaptureRequestRejectsBadAuthWithoutLeakingValues(t *testing.T) {
+	_, err := NormalizeCaptureRequest(CaptureRequest{
+		URL: "http://localhost:3000",
+		Auth: CaptureAuth{
+			Headers: []CaptureHeader{{Name: "Bad Header", Value: "secret-token"}},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if strings.Contains(err.Error(), "secret-token") {
+		t.Fatalf("validation error leaked header value: %v", err)
 	}
 }
 

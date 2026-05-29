@@ -82,6 +82,45 @@ func TestParseShotCLITileFlags(t *testing.T) {
 	}
 }
 
+func TestParseShotCLIAuthAndGuardFlags(t *testing.T) {
+	invocation, err := parseCLI([]string{
+		"shot",
+		"--cookie-jar", "cookies.txt",
+		"--storage-state", "state.json",
+		"--header", "Authorization: Bearer secret",
+		"--cookie", "sid=secret; domain=localhost; path=/; httpOnly; sameSite=Lax; expires=1893456000",
+		"--expect-url", "/admin",
+		"--fail-on-url", "/login",
+		"--fail-on-selector", "form[action='/login']",
+		"http://localhost:3000/admin",
+	})
+	if err != nil {
+		t.Fatalf("parseCLI returned error: %v", err)
+	}
+	req := invocation.Shot.Request
+	if req.Auth.CookieJar != "cookies.txt" || req.Auth.StorageState != "state.json" {
+		t.Fatalf("auth files were not parsed: %#v", req.Auth)
+	}
+	if len(req.Auth.Headers) != 1 || req.Auth.Headers[0].Name != "Authorization" || req.Auth.Headers[0].Value != "Bearer secret" {
+		t.Fatalf("headers were not parsed: %#v", req.Auth.Headers)
+	}
+	if len(req.Auth.Cookies) != 1 || req.Auth.Cookies[0].Name != "sid" || !req.Auth.Cookies[0].HTTPOnly || req.Auth.Cookies[0].SameSite != "Lax" {
+		t.Fatalf("cookies were not parsed: %#v", req.Auth.Cookies)
+	}
+	if req.Guards.ExpectURL != "/admin" || len(req.Guards.FailOnURL) != 1 || len(req.Guards.FailOnSelector) != 1 {
+		t.Fatalf("guards were not parsed: %#v", req.Guards)
+	}
+}
+
+func TestParseShotCLIRejectsInvalidAuthFlags(t *testing.T) {
+	if _, err := parseCLI([]string{"shot", "--header", "Authorization", "http://localhost:3000"}); err == nil {
+		t.Fatal("expected invalid header flag")
+	}
+	if _, err := parseCLI([]string{"shot", "--cookie", "sid", "http://localhost:3000"}); err == nil {
+		t.Fatal("expected invalid cookie flag")
+	}
+}
+
 func TestParseShotCLIVisibleCapture(t *testing.T) {
 	invocation, err := parseCLI([]string{"shot", "--visible", "http://localhost:3000"})
 	if err != nil {

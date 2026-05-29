@@ -125,6 +125,41 @@ func TestPlaywrightCaptureErrorMapping(t *testing.T) {
 	}
 }
 
+func TestURLGuardVerification(t *testing.T) {
+	if err := verifyURLGuards(CaptureGuards{ExpectURL: "/admin", FailOnURL: []string{"/login"}}, "http://localhost:3000/admin"); err != nil {
+		t.Fatalf("verifyURLGuards returned error: %v", err)
+	}
+	err := verifyURLGuards(CaptureGuards{ExpectURL: "/admin"}, "http://localhost:3000/login")
+	var captureErr *Error
+	if !errors.As(err, &captureErr) || captureErr.Operation != "verify_url_guard" || captureErr.Metadata["expect_url"] != "/admin" {
+		t.Fatalf("unexpected expect_url guard error: %+v", err)
+	}
+	err = verifyURLGuards(CaptureGuards{FailOnURL: []string{"/login"}}, "http://localhost:3000/login")
+	if !errors.As(err, &captureErr) || captureErr.Operation != "verify_url_guard" || captureErr.Metadata["fail_on_url"] != "/login" {
+		t.Fatalf("unexpected fail_on_url guard error: %+v", err)
+	}
+}
+
+func TestChromiumStorageStateRejectsOriginStorageWithoutLeakingValues(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+	payload := `{"cookies":[{"name":"sid","value":"cookie-secret","domain":"localhost","path":"/"}],"origins":[{"origin":"http://localhost:3000","localStorage":[{"name":"token","value":"local-storage-secret"}]}]}`
+	if err := os.WriteFile(path, []byte(payload), 0o644); err != nil {
+		t.Fatalf("write storage state: %v", err)
+	}
+	_, err := resolveChromiumStorageStateCookies(CaptureRequest{Auth: CaptureAuth{StorageState: path}})
+	if err == nil {
+		t.Fatal("expected unsupported storage state error")
+	}
+	if strings.Contains(err.Error(), "cookie-secret") || strings.Contains(err.Error(), "local-storage-secret") {
+		t.Fatalf("storage state error leaked values: %v", err)
+	}
+	var captureErr *Error
+	if !errors.As(err, &captureErr) || captureErr.Code != CodeUnsupported || captureErr.Metadata["engine"] != "chromium" {
+		t.Fatalf("unexpected storage state error: %+v", err)
+	}
+}
+
 func TestPlaywrightRuntimeWaitForFunctionPredicateForms(t *testing.T) {
 	engine := newTestPlaywrightRuntimeEngine(t)
 	tests := []struct {

@@ -111,6 +111,12 @@ func TestSessionToolsList(t *testing.T) {
 		if _, ok := properties["wait_for_function"]; !ok {
 			t.Fatalf("%s schema missing wait_for_function", tool.Name)
 		}
+		if _, ok := properties["auth"]; !ok {
+			t.Fatalf("%s schema missing auth", tool.Name)
+		}
+		if _, ok := properties["guards"]; !ok {
+			t.Fatalf("%s schema missing guards", tool.Name)
+		}
 	}
 }
 
@@ -165,6 +171,38 @@ func TestCapturePageAcceptsTileOptions(t *testing.T) {
 	}
 	if capture.lastCapture.WaitForFunction != "window.__webcapReady" {
 		t.Fatalf("wait_for_function was not forwarded: %+v", capture.lastCapture)
+	}
+}
+
+func TestCapturePageForwardsAuthAndGuards(t *testing.T) {
+	capture := &fakeCaptureService{captureResult: sampleCaptureResult("/tmp/out.png")}
+	server, err := NewServer(Config{
+		Name:    "webcap",
+		Version: "0.1.0",
+		Capture: capture,
+		Diff:    &fakeDiffService{result: sampleDiffResult()},
+		LoadManifest: func(string) (pkgwebcap.Manifest, error) {
+			return pkgwebcap.Manifest{}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewServer returned error: %v", err)
+	}
+	session := server.NewSession()
+	initializeSession(t, session)
+
+	resp := session.handle(context.Background(), []byte(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"capture_page","arguments":{"url":"http://localhost:3000/admin","auth":{"headers":[{"name":"Authorization","value":"Bearer secret"}],"cookies":[{"name":"sid","value":"cookie-secret","path":"/"}]},"guards":{"expect_url":"/admin","fail_on_url":["/login"],"fail_on_selector":["form.login"]}}}}`))
+	if resp == nil || resp.Error != nil {
+		t.Fatalf("tools/call returned protocol error: %#v", resp)
+	}
+	if len(capture.lastCapture.Auth.Headers) != 1 || capture.lastCapture.Auth.Headers[0].Name != "Authorization" {
+		t.Fatalf("auth headers were not forwarded: %#v", capture.lastCapture.Auth)
+	}
+	if len(capture.lastCapture.Auth.Cookies) != 1 || capture.lastCapture.Auth.Cookies[0].Name != "sid" {
+		t.Fatalf("auth cookies were not forwarded: %#v", capture.lastCapture.Auth)
+	}
+	if capture.lastCapture.Guards.ExpectURL != "/admin" || len(capture.lastCapture.Guards.FailOnURL) != 1 || len(capture.lastCapture.Guards.FailOnSelector) != 1 {
+		t.Fatalf("guards were not forwarded: %#v", capture.lastCapture.Guards)
 	}
 }
 

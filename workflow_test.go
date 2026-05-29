@@ -1151,6 +1151,35 @@ func TestApplyWorkflowCaptureDefaultsWaitForFunction(t *testing.T) {
 	}
 }
 
+func TestApplyWorkflowCaptureDefaultsMergesAuthAndGuards(t *testing.T) {
+	req := CaptureRequest{
+		Auth: CaptureAuth{
+			Headers: []CaptureHeader{{Name: "X-Test", Value: "screen-secret"}},
+		},
+		Guards: CaptureGuards{FailOnSelector: []string{"form.login"}},
+	}
+	applyWorkflowCaptureDefaults(&req, WorkflowDefaults{
+		Auth: CaptureAuth{
+			CookieJar: "cookies.txt",
+			Headers:   []CaptureHeader{{Name: "X-Test", Value: "default-secret"}, {Name: "X-Default", Value: "default"}},
+			Cookies:   []CaptureCookie{{Name: "sid", Value: "cookie", Path: "/"}},
+		},
+		Guards: CaptureGuards{
+			ExpectURL: "/admin",
+			FailOnURL: []string{"/login"},
+		},
+	})
+	if req.Auth.CookieJar != "cookies.txt" || len(req.Auth.Cookies) != 1 {
+		t.Fatalf("auth defaults were not applied: %#v", req.Auth)
+	}
+	if len(req.Auth.Headers) != 2 || req.Auth.Headers[0].Name != "X-Test" || req.Auth.Headers[0].Value != "screen-secret" {
+		t.Fatalf("headers were not merged/replaced: %#v", req.Auth.Headers)
+	}
+	if req.Guards.ExpectURL != "/admin" || len(req.Guards.FailOnURL) != 1 || len(req.Guards.FailOnSelector) != 1 {
+		t.Fatalf("guards were not merged: %#v", req.Guards)
+	}
+}
+
 func TestGenerateWorkflowReportRendersMultiScreenStoryComparison(t *testing.T) {
 	tempDir := t.TempDir()
 	patientReferencePath := filepath.Join(tempDir, "patient-reference.png")

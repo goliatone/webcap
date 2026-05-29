@@ -175,7 +175,15 @@ func TestCapturePageAcceptsTileOptions(t *testing.T) {
 }
 
 func TestCapturePageForwardsAuthAndGuards(t *testing.T) {
-	capture := &fakeCaptureService{captureResult: sampleCaptureResult("/tmp/out.png")}
+	captureResult := sampleCaptureResult("/tmp/out.png")
+	captureResult.Guards = []pkgwebcap.GuardOutcome{{
+		Kind:     "expect_url",
+		Value:    "/admin",
+		FinalURL: "http://localhost:3000/admin",
+		Matched:  true,
+		Status:   "passed",
+	}}
+	capture := &fakeCaptureService{captureResult: captureResult}
 	server, err := NewServer(Config{
 		Name:    "webcap",
 		Version: "0.1.0",
@@ -203,6 +211,17 @@ func TestCapturePageForwardsAuthAndGuards(t *testing.T) {
 	}
 	if capture.lastCapture.Guards.ExpectURL != "/admin" || len(capture.lastCapture.Guards.FailOnURL) != 1 || len(capture.lastCapture.Guards.FailOnSelector) != 1 {
 		t.Fatalf("guards were not forwarded: %#v", capture.lastCapture.Guards)
+	}
+	result, ok := resp.Result.(callToolResult)
+	if !ok {
+		t.Fatalf("unexpected tools/call result type: %T", resp.Result)
+	}
+	structured, ok := result.StructuredContent.(captureToolResult)
+	if !ok {
+		t.Fatalf("unexpected structured capture result type: %T", result.StructuredContent)
+	}
+	if len(structured.Guards) != 1 || structured.Guards[0].Kind != "expect_url" || structured.Guards[0].Status != "passed" {
+		t.Fatalf("structured result missing guard outcomes: %#v", structured.Guards)
 	}
 }
 

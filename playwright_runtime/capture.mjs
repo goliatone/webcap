@@ -1,5 +1,5 @@
 import { chromium, firefox, webkit } from "playwright";
-import { errorEnvelopeFrom, waitForUserFunction } from "./wait_for_function.mjs";
+import { captureError, errorEnvelopeFrom, waitForUserFunction } from "./wait_for_function.mjs";
 
 const browserMap = { chromium, firefox, webkit };
 const warnings = [];
@@ -20,6 +20,9 @@ if (!browserType) {
 const timings = {};
 const startedAt = new Date();
 const viewport = request.viewport ?? {};
+const auth = request.auth ?? {};
+const guards = request.guards ?? {};
+const guardOutcomes = [];
 const timeoutMs = parseDuration(request.timeout, 30000);
 const waitMs = parseDuration(request.wait, 0);
 const idleMs = parseDuration(request.readiness_idle, 500);
@@ -40,6 +43,13 @@ try {
     userAgent: request.user_agent || undefined,
     reducedMotion: request.reduced_motion ? "reduce" : "no-preference",
   };
+  if (auth.storage_state) {
+    contextOptions.storageState = String(auth.storage_state);
+  }
+  const extraHTTPHeaders = authHeaders(auth.headers);
+  if (Object.keys(extraHTTPHeaders).length) {
+    contextOptions.extraHTTPHeaders = extraHTTPHeaders;
+  }
   if (viewport.mobile && browserName !== "firefox") {
     contextOptions.isMobile = true;
   } else if (viewport.mobile && browserName === "firefox") {
@@ -49,6 +59,10 @@ try {
     });
   }
   context = await browser.newContext(contextOptions);
+  const authCookies = playwrightCookies(auth.cookies, request.url);
+  if (authCookies.length) {
+    await context.addCookies(authCookies);
+  }
 
   if (request.disable_animations) {
     await context.addInitScript(() => {
@@ -81,6 +95,7 @@ try {
     timeout: timeoutMs,
   });
   timings.navigation_completed_at = new Date().toISOString();
+  verifyURLGuards(guards, page.url());
 
   if (request.after_navigate_js) {
     await page.evaluate(String(request.after_navigate_js));
@@ -129,6 +144,8 @@ try {
   if (request.before_capture_js) {
     await page.evaluate(String(request.before_capture_js));
   }
+  guardOutcomes.push(...verifyURLGuards(guards, page.url()));
+  guardOutcomes.push(...(await verifySelectorGuards(page, guards, page.url())));
 
   timings.ready_at = new Date().toISOString();
 
@@ -136,7 +153,7 @@ try {
   let artifact = {
     image_format: "png",
     mode: captureMode(request),
-    url: String(request.url),
+    url: page.url(),
     viewport: viewport,
     selectors,
   };
@@ -253,10 +270,11 @@ try {
         captured_at: capturedAt.toISOString(),
         total_duration: formatDuration(totalDurationMs),
       },
-      warnings,
-      bytes_base64: Buffer.from(bytes).toString("base64"),
-    })
-  );
+	      warnings,
+	      guards: guardOutcomes,
+	      bytes_base64: Buffer.from(bytes).toString("base64"),
+	    })
+	  );
 } catch (err) {
   process.stderr.write(JSON.stringify(errorEnvelopeFrom(err)));
   process.exitCode = 1;
@@ -355,4 +373,139 @@ function formatDuration(ms) {
   if (ms < 1000) return `${ms}ms`;
   const seconds = (ms / 1000).toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
   return `${seconds}s`;
+}
+
+function authHeaders(headers) {
+  const out = {};
+  if (!Array.isArray(headers)) return out;
+  for (const header of headers) {
+    const name = String(header?.name || "").trim();
+    if (!name) continue;
+    out[name] = String(header?.value ?? "");
+  }
+  return out;
+}
+
+function playwrightCookies(cookies, targetURL) {
+  if (!Array.isArray(cookies)) return [];
+  return cookies
+    .map((cookie) => {
+      const out = {
+        name: String(cookie?.name || "").trim(),
+        value: String(cookie?.value ?? ""),
+        path: String(cookie?.path || "/"),
+        secure: !!cookie?.secure,
+        httpOnly: !!cookie?.httpOnly,
+      };
+      if (!out.name) return null;
+      const domain = String(cookie?.domain || "").trim();
+      if (domain && !cookie?.HostOnly) {
+        out.domain = domain;
+      } else {
+        out.url = cookieURLForTarget(targetURL, domain, out.path);
+      }
+      const sameSite = normalizeSameSite(cookie?.sameSite);
+      if (sameSite) out.sameSite = sameSite;
+      const expires = Number(cookie?.expires || 0);
+      if (expires > 0) out.expires = expires;
+      return out;
+    })
+    .filter(Boolean);
+}
+
+function cookieURLForTarget(targetURL, domain, path) {
+  try {
+    const parsed = new URL(String(targetURL));
+    if (domain && domain !== "localhost") parsed.hostname = domain.replace(/^\./, "");
+    parsed.pathname = path || "/";
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch {
+    return String(targetURL);
+  }
+}
+
+function normalizeSameSite(value) {
+  switch (String(value || "").trim().toLowerCase()) {
+    case "strict":
+      return "Strict";
+    case "lax":
+      return "Lax";
+    case "none":
+      return "None";
+    default:
+      return undefined;
+  }
+}
+
+function verifyURLGuards(guards, finalURL) {
+  const url = String(finalURL || "");
+  const outcomes = [];
+  const expectURL = String(guards?.expect_url || "").trim();
+  if (expectURL) {
+    const matched = url.includes(expectURL);
+    outcomes.push(guardOutcome("expect_url", expectURL, url, matched, matched));
+    if (!matched) {
+      throw captureError("capture_error", "verify_url_guard", "final URL did not contain expected substring", {
+        guard: "expect_url",
+        expect_url: expectURL,
+        final_url: url,
+      });
+    }
+  }
+  for (const forbidden of Array.isArray(guards?.fail_on_url) ? guards.fail_on_url : []) {
+    const value = String(forbidden || "").trim();
+    if (!value) continue;
+    const matched = url.includes(value);
+    outcomes.push(guardOutcome("fail_on_url", value, url, matched, !matched));
+    if (matched) {
+      throw captureError("capture_error", "verify_url_guard", "final URL matched forbidden substring", {
+        guard: "fail_on_url",
+        fail_on_url: value,
+        final_url: url,
+      });
+    }
+  }
+  return outcomes;
+}
+
+async function verifySelectorGuards(page, guards, finalURL) {
+  const selectors = Array.isArray(guards?.fail_on_selector)
+    ? guards.fail_on_selector.map((value) => String(value || "").trim()).filter(Boolean)
+    : [];
+  if (!selectors.length) return [];
+  const matched = await page.evaluate((items) => {
+    for (const selector of items) {
+      const nodes = Array.from(document.querySelectorAll(selector));
+      for (const node of nodes) {
+        const style = window.getComputedStyle(node);
+        const rect = node.getBoundingClientRect();
+        if (style && style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0) {
+          return selector;
+        }
+      }
+    }
+    return "";
+  }, selectors);
+  if (matched) {
+    throw captureError("capture_error", "verify_selector_guard", "page matched forbidden selector", {
+      guard: "fail_on_selector",
+      selector: matched,
+      final_url: String(finalURL || ""),
+    });
+  }
+  return selectors.map((selector) =>
+    guardOutcome("fail_on_selector", selector, String(finalURL || ""), selector === matched, selector !== matched)
+  );
+}
+
+function guardOutcome(kind, value, finalURL, matched, passed) {
+  return {
+    kind,
+    value,
+    final_url: finalURL,
+    matched,
+    status: passed ? "passed" : "failed",
+  };
 }

@@ -64,6 +64,51 @@ webcap shot \
   http://localhost:6006/iframe.html?id=components-button--primary
 ```
 
+## Authenticated captures
+
+`webcap` does not script login forms. Acquire auth state with app tooling, `curl`, or Playwright, then hand that state to the capture and add guards so redirects to login fail clearly.
+
+Cookie-authenticated local admin flow:
+
+```bash
+curl -c /tmp/admin-cookies.txt \
+  -d identifier=admin@example.test \
+  -d password="$ADMIN_PASSWORD" \
+  http://localhost:9090/admin/login
+
+webcap shot \
+  --cookie-jar /tmp/admin-cookies.txt \
+  --expect-url /admin/translations/queue \
+  --fail-on-url /admin/login \
+  --fail-on-selector 'form[action*="/login"]' \
+  --output shots/translations-queue.png \
+  http://localhost:9090/admin/translations/queue
+```
+
+For local-only development auth headers:
+
+```bash
+webcap shot \
+  --header "Authorization: Bearer $WEB_AUTH_TOKEN" \
+  --expect-url /admin \
+  --fail-on-url /login \
+  http://localhost:9090/admin
+```
+
+For Playwright teams, pass a storage-state file:
+
+```bash
+webcap shot \
+  --engine playwright \
+  --storage-state .auth/admin-state.json \
+  --expect-url /admin \
+  http://localhost:9090/admin
+```
+
+Cookie jars and explicit cookies work in both engines. Playwright storage state is full-fidelity in the Playwright engine. Chromium imports cookies from Playwright storage-state files only when `origins` is empty; origin localStorage/sessionStorage currently fails with `unsupported_error` instead of being silently ignored. URL guards use substring matching, not regex or glob syntax.
+
+Auth values are redacted from `resolved_config`, metadata sidecars, JSON errors, MCP responses, warnings, and human output. Shell history is outside `webcap`'s control, so prefer files or environment expansion for secrets.
+
 The standalone CLI does not include application-specific scenario aliases or paths. Provide scenario files explicitly.
 Use `--openai-base-url` or `--anthropic-base-url` with `semantic-diff`, `workflow capture-scenario`, `report scenario`, or `mcp serve` when routing built-in providers through a local fake server, proxy, or compatible gateway.
 Use `--codex-bin`, `--codex-profile`, `--codex-oss`, `--codex-local-provider`, and repeated `--codex-extra-arg` flags to configure the local Codex CLI process. CLI providers reuse local tool configuration and may still use subscriptions, API accounts, or local model resources.

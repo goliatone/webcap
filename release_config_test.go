@@ -52,3 +52,54 @@ func TestGoReleaserInjectsVersionMetadata(t *testing.T) {
 		}
 	}
 }
+
+func TestGoReleaserPublishesHomebrewCask(t *testing.T) {
+	data, err := os.ReadFile(".goreleaser.yml")
+	if err != nil {
+		t.Fatalf("read .goreleaser.yml: %v", err)
+	}
+
+	var config struct {
+		Brews         []any `yaml:"brews"`
+		HomebrewCask []struct {
+			Name        string   `yaml:"name"`
+			Binaries    []string `yaml:"binaries"`
+			Directory   string   `yaml:"directory"`
+			Description string   `yaml:"description"`
+			Homepage    string   `yaml:"homepage"`
+		} `yaml:"homebrew_casks"`
+	}
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		t.Fatalf("parse .goreleaser.yml: %v", err)
+	}
+	if len(config.Brews) != 0 {
+		t.Fatal("expected GoReleaser config to use homebrew_casks instead of deprecated brews")
+	}
+
+	for _, cask := range config.HomebrewCask {
+		if cask.Name != "webcap" {
+			continue
+		}
+		if cask.Directory != "Casks" {
+			t.Fatalf("expected webcap cask directory to be Casks, got %q", cask.Directory)
+		}
+		if !containsString(cask.Binaries, "webcap") {
+			t.Fatalf("expected webcap cask to install webcap binary, got %v", cask.Binaries)
+		}
+		if cask.Description == "" || cask.Homepage == "" {
+			t.Fatalf("expected webcap cask metadata to include description and homepage, got %+v", cask)
+		}
+		return
+	}
+
+	t.Fatal("expected .goreleaser.yml to define a webcap homebrew cask")
+}
+
+func containsString(values []string, expected string) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
+}

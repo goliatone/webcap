@@ -44,22 +44,23 @@ changelog:
       - "^test:"
       - "^Update README"
       - "merge fix"
-brews:
+homebrew_casks:
   - name: webcap
+    binaries:
+      - webcap
     repository:
       owner: goliatone
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    directory: Formula
+    directory: Casks
     description: Browser screenshot, image diff, workflow report, and MCP CLI.
     homepage: https://github.com/goliatone/webcap
-    license: "MIT"
-    test: |
-      assert_predicate bin/"webcap", :exist?
-      output = shell_output("#{bin}/webcap version")
-      assert_match "Version:  #{version}", output
-      assert_match(/Build Commit Hash:\s+[0-9a-f]{40}/, output)
-      refute_match "Version:  dev", output
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/webcap"]
+          end
 nfpms:
   - id: webcap
     file_name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ if eq .Arch "amd64" }}x86_64{{ else if eq .Arch "386" }}i386{{ else }}{{ .Arch }}{{ end }}{{ with .Arm }}v{{ . }}{{ end }}'

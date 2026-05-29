@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"strconv"
 	"strings"
 
 	pkgwebcap "github.com/goliatone/webcap"
@@ -152,14 +153,18 @@ func parseVersionCLI(args []string) (cliInvocation, error) {
 
 func parseShotCLI(args []string) (cliInvocation, error) {
 	var (
-		stderr       bytes.Buffer
-		outputPath   string
-		metadataPath string
-		selectorsCSV string
-		selectorsAll string
-		viewport     string
-		fullPage     bool
-		visible      bool
+		stderr         bytes.Buffer
+		outputPath     string
+		metadataPath   string
+		selectorsCSV   string
+		selectorsAll   string
+		viewport       string
+		fullPage       bool
+		visible        bool
+		headers        stringSliceFlag
+		cookies        stringSliceFlag
+		failOnURL      stringSliceFlag
+		failOnSelector stringSliceFlag
 	)
 
 	invocation := cliInvocation{Command: "shot", Output: defaultOutputOptions()}
@@ -181,6 +186,13 @@ func parseShotCLI(args []string) (cliInvocation, error) {
 	fs.StringVar(&invocation.Shot.Request.WaitForFunction, "wait-for-function", "", "Wait for a JavaScript predicate to become truthy before capture.")
 	fs.StringVar(&invocation.Shot.Request.JavaScript, "javascript", "", "Run JavaScript before capture.")
 	fs.StringVar(&invocation.Shot.Request.Timeout, "timeout", "", "Overall capture timeout such as 30s.")
+	fs.StringVar(&invocation.Shot.Request.Auth.CookieJar, "cookie-jar", "", "Netscape/curl cookie jar to import before navigation.")
+	fs.StringVar(&invocation.Shot.Request.Auth.StorageState, "storage-state", "", "Playwright storage-state JSON file to import before navigation.")
+	fs.Var(&headers, "header", "HTTP header in 'Name: value' form; repeat for multiple values.")
+	fs.Var(&cookies, "cookie", "Cookie in 'name=value; domain=...; path=/; secure; httpOnly; sameSite=Lax; expires=UNIX' form; repeat for multiple values.")
+	fs.StringVar(&invocation.Shot.Request.Guards.ExpectURL, "expect-url", "", "Require the final URL to contain this substring.")
+	fs.Var(&failOnURL, "fail-on-url", "Fail if the final URL contains this substring; repeat for multiple values.")
+	fs.Var(&failOnSelector, "fail-on-selector", "Fail if this selector is visible before capture; repeat for multiple values.")
 	fs.StringVar((*string)(&invocation.Shot.Request.OversizePolicy), "oversize", "", "Oversize policy: fail or tile.")
 	fs.IntVar(&invocation.Shot.Request.Tile.MaxWidth, "tile-max-width", 0, "Maximum tile width in CSS pixels.")
 	fs.IntVar(&invocation.Shot.Request.Tile.MaxHeight, "tile-max-height", 0, "Maximum tile height in CSS pixels.")
@@ -215,6 +227,18 @@ func parseShotCLI(args []string) (cliInvocation, error) {
 	invocation.Shot.Request.MetadataPath = strings.TrimSpace(metadataPath)
 	invocation.Shot.Request.Selectors = splitCSV(selectorsCSV)
 	invocation.Shot.Request.SelectorsAll = splitCSV(selectorsAll)
+	parsedHeaders, err := parseHeaderFlags(headers)
+	if err != nil {
+		return cliInvocation{}, cliParseError{Message: err.Error(), Output: invocation.Output}
+	}
+	parsedCookies, err := parseCookieFlags(cookies)
+	if err != nil {
+		return cliInvocation{}, cliParseError{Message: err.Error(), Output: invocation.Output}
+	}
+	invocation.Shot.Request.Auth.Headers = parsedHeaders
+	invocation.Shot.Request.Auth.Cookies = parsedCookies
+	invocation.Shot.Request.Guards.FailOnURL = append([]string(nil), failOnURL...)
+	invocation.Shot.Request.Guards.FailOnSelector = append([]string(nil), failOnSelector...)
 	fullPageSet := flagVisited(fs, "full-page")
 	visibleSet := flagVisited(fs, "visible")
 	if visibleSet && fullPageSet && fullPage {
@@ -578,6 +602,84 @@ func (f *stringSliceFlag) Set(value string) error {
 		*f = append(*f, value)
 	}
 	return nil
+}
+
+func parseHeaderFlags(values []string) ([]pkgwebcap.CaptureHeader, error) {
+	headers := make([]pkgwebcap.CaptureHeader, 0, len(values))
+	for _, value := range values {
+		name, headerValue, ok := strings.Cut(value, ":")
+		if !ok || strings.TrimSpace(name) == "" {
+			return nil, fmt.Errorf("invalid --header value, expected 'Name: value'")
+		}
+		headers = append(headers, pkgwebcap.CaptureHeader{
+			Name:  strings.TrimSpace(name),
+			Value: strings.TrimSpace(headerValue),
+		})
+	}
+	return headers, nil
+}
+
+func parseCookieFlags(values []string) ([]pkgwebcap.CaptureCookie, error) {
+	cookies := make([]pkgwebcap.CaptureCookie, 0, len(values))
+	for _, value := range values {
+		cookie, err := parseCookieFlag(value)
+		if err != nil {
+			return nil, err
+		}
+		cookies = append(cookies, cookie)
+	}
+	return cookies, nil
+}
+
+func parseCookieFlag(value string) (pkgwebcap.CaptureCookie, error) {
+	parts := strings.Split(value, ";")
+	if len(parts) == 0 {
+		return pkgwebcap.CaptureCookie{}, fmt.Errorf("invalid --cookie value, expected name=value")
+	}
+	name, cookieValue, ok := strings.Cut(strings.TrimSpace(parts[0]), "=")
+	if !ok || strings.TrimSpace(name) == "" {
+		return pkgwebcap.CaptureCookie{}, fmt.Errorf("invalid --cookie value, expected name=value")
+	}
+	cookie := pkgwebcap.CaptureCookie{Name: strings.TrimSpace(name), Value: strings.TrimSpace(cookieValue)}
+	for _, rawPart := range parts[1:] {
+		part := strings.TrimSpace(rawPart)
+		if part == "" {
+			continue
+		}
+		key, val, hasValue := strings.Cut(part, "=")
+		key = strings.ToLower(strings.TrimSpace(key))
+		val = strings.TrimSpace(val)
+		switch key {
+		case "domain":
+			cookie.Domain = val
+		case "path":
+			cookie.Path = val
+		case "secure":
+			cookie.Secure = !hasValue || parseBoolish(val)
+		case "httponly", "http_only":
+			cookie.HTTPOnly = !hasValue || parseBoolish(val)
+		case "samesite", "same_site":
+			cookie.SameSite = val
+		case "expires":
+			expires, err := strconv.ParseInt(val, 10, 64)
+			if err != nil {
+				return pkgwebcap.CaptureCookie{}, fmt.Errorf("invalid --cookie expires value")
+			}
+			cookie.Expires = expires
+		default:
+			return pkgwebcap.CaptureCookie{}, fmt.Errorf("invalid --cookie attribute %q", key)
+		}
+	}
+	return cookie, nil
+}
+
+func parseBoolish(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func recordVisitedBrowserFlags(fs *flag.FlagSet, browser *browserOptions) {

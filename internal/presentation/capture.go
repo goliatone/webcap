@@ -27,6 +27,11 @@ func writeCapture(w io.Writer, result pkgwebcap.CaptureResult) error {
 	if err := writeCaptureTiling(w, result.Tiling); err != nil {
 		return err
 	}
+	if len(result.Guards) > 0 {
+		if _, err := fmt.Fprintf(w, "Guards: %d passed\n", len(result.Guards)); err != nil {
+			return err
+		}
+	}
 	if !result.CapturedAt.IsZero() {
 		if _, err := fmt.Fprintf(w, "Captured: %s\n", result.CapturedAt.Format("2006-01-02T15:04:05Z07:00")); err != nil {
 			return err

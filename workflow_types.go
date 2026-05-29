@@ -112,6 +112,8 @@ type WorkflowDefaults struct {
 	WaitFor           string               `json:"wait_for,omitempty" yaml:"wait_for,omitempty"`
 	WaitForFunction   string               `json:"wait_for_function,omitempty" yaml:"wait_for_function,omitempty"`
 	FullPage          *bool                `json:"full_page,omitempty" yaml:"full_page,omitempty"`
+	Auth              CaptureAuth          `json:"auth,omitzero" yaml:"auth,omitempty"`
+	Guards            CaptureGuards        `json:"guards,omitzero" yaml:"guards,omitempty"`
 	OversizePolicy    OversizePolicy       `json:"oversize_policy,omitempty" yaml:"oversize_policy,omitempty"`
 	Tile              CaptureTileOptions   `json:"tile,omitzero" yaml:"tile,omitempty"`
 }

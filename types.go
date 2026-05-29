@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -73,8 +74,51 @@ type CaptureRequest struct {
 	AfterNavigateJS   string             `json:"after_navigate_js,omitempty" yaml:"after_navigate_js,omitempty"`
 	BeforeCaptureJS   string             `json:"before_capture_js,omitempty" yaml:"before_capture_js,omitempty"`
 	Timeout           string             `json:"timeout,omitempty" yaml:"timeout,omitempty"`
+	Auth              CaptureAuth        `json:"auth,omitzero" yaml:"auth,omitempty"`
+	Guards            CaptureGuards      `json:"guards,omitzero" yaml:"guards,omitempty"`
 	OversizePolicy    OversizePolicy     `json:"oversize_policy,omitempty" yaml:"oversize_policy,omitempty"`
 	Tile              CaptureTileOptions `json:"tile,omitzero" yaml:"tile,omitempty"`
+}
+
+type CaptureAuth struct {
+	CookieJar    string          `json:"cookie_jar,omitempty" yaml:"cookie_jar,omitempty"`
+	StorageState string          `json:"storage_state,omitempty" yaml:"storage_state,omitempty"`
+	Headers      []CaptureHeader `json:"headers,omitempty" yaml:"headers,omitempty"`
+	Cookies      []CaptureCookie `json:"cookies,omitempty" yaml:"cookies,omitempty"`
+}
+
+func (a CaptureAuth) IsZero() bool {
+	return strings.TrimSpace(a.CookieJar) == "" &&
+		strings.TrimSpace(a.StorageState) == "" &&
+		len(a.Headers) == 0 &&
+		len(a.Cookies) == 0
+}
+
+type CaptureHeader struct {
+	Name  string `json:"name" yaml:"name"`
+	Value string `json:"value" yaml:"value"`
+}
+
+type CaptureCookie struct {
+	Name     string `json:"name" yaml:"name"`
+	Value    string `json:"value" yaml:"value"`
+	Domain   string `json:"domain,omitempty" yaml:"domain,omitempty"`
+	Path     string `json:"path,omitempty" yaml:"path,omitempty"`
+	Secure   bool   `json:"secure,omitempty" yaml:"secure,omitempty"`
+	HTTPOnly bool   `json:"httpOnly,omitempty" yaml:"httpOnly,omitempty"`
+	SameSite string `json:"sameSite,omitempty" yaml:"sameSite,omitempty"`
+	Expires  int64  `json:"expires,omitempty" yaml:"expires,omitempty"`
+	HostOnly bool   `json:"-" yaml:"-"`
+}
+
+type CaptureGuards struct {
+	ExpectURL      string   `json:"expect_url,omitempty" yaml:"expect_url,omitempty"`
+	FailOnURL      []string `json:"fail_on_url,omitempty" yaml:"fail_on_url,omitempty"`
+	FailOnSelector []string `json:"fail_on_selector,omitempty" yaml:"fail_on_selector,omitempty"`
+}
+
+func (g CaptureGuards) IsZero() bool {
+	return strings.TrimSpace(g.ExpectURL) == "" && len(g.FailOnURL) == 0 && len(g.FailOnSelector) == 0
 }
 
 type OversizePolicy string
@@ -294,6 +338,14 @@ type CaptureWarning struct {
 	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
+type GuardOutcome struct {
+	Kind     string `json:"kind"`
+	Value    string `json:"value,omitempty"`
+	FinalURL string `json:"final_url,omitempty"`
+	Matched  bool   `json:"matched"`
+	Status   string `json:"status"`
+}
+
 type CaptureNormalization struct {
 	OutputGenerated   bool          `json:"output_generated"`
 	OutputBaseName    string        `json:"output_base_name,omitempty"`
@@ -317,6 +369,7 @@ type CaptureResult struct {
 	Browser        BrowserInfo          `json:"browser"`
 	Timing         CaptureTiming        `json:"timing"`
 	Warnings       []CaptureWarning     `json:"warnings,omitempty"`
+	Guards         []GuardOutcome       `json:"guards,omitempty"`
 	Tiling         *CaptureTiling       `json:"tiling,omitempty"`
 	Normalization  CaptureNormalization `json:"normalization"`
 	ResolvedConfig CaptureRequest       `json:"resolved_config"`
@@ -340,9 +393,13 @@ type Manifest struct {
 	ReducedMotion     bool               `json:"reduced_motion,omitempty" yaml:"reduced_motion,omitempty"`
 	WaitForFonts      bool               `json:"wait_for_fonts,omitempty" yaml:"wait_for_fonts,omitempty"`
 	Timeout           string             `json:"timeout,omitempty" yaml:"timeout,omitempty"`
+	Auth              CaptureAuth        `json:"auth,omitzero" yaml:"auth,omitempty"`
+	Guards            CaptureGuards      `json:"guards,omitzero" yaml:"guards,omitempty"`
 	OversizePolicy    OversizePolicy     `json:"oversize_policy,omitempty" yaml:"oversize_policy,omitempty"`
 	Tile              CaptureTileOptions `json:"tile,omitzero" yaml:"tile,omitempty"`
 	Shots             []ManifestShot     `json:"shots" yaml:"shots"`
+	SourcePath        string             `json:"-" yaml:"-"`
+	SourceDir         string             `json:"-" yaml:"-"`
 }
 
 type ManifestShot struct {
@@ -369,6 +426,8 @@ type ManifestShot struct {
 	ReducedMotion     bool               `json:"reduced_motion,omitempty" yaml:"reduced_motion,omitempty"`
 	WaitForFonts      bool               `json:"wait_for_fonts,omitempty" yaml:"wait_for_fonts,omitempty"`
 	Timeout           string             `json:"timeout,omitempty" yaml:"timeout,omitempty"`
+	Auth              CaptureAuth        `json:"auth,omitzero" yaml:"auth,omitempty"`
+	Guards            CaptureGuards      `json:"guards,omitzero" yaml:"guards,omitempty"`
 	OversizePolicy    OversizePolicy     `json:"oversize_policy,omitempty" yaml:"oversize_policy,omitempty"`
 	Tile              CaptureTileOptions `json:"tile,omitzero" yaml:"tile,omitempty"`
 }
@@ -378,6 +437,7 @@ type EngineResult struct {
 	Browser  BrowserInfo      `json:"browser"`
 	Timing   CaptureTiming    `json:"timing"`
 	Warnings []CaptureWarning `json:"warnings,omitempty"`
+	Guards   []GuardOutcome   `json:"guards,omitempty"`
 	Tiling   *CaptureTiling   `json:"tiling,omitempty"`
 }
 
@@ -425,6 +485,8 @@ func trimCaptureRequest(req CaptureRequest) CaptureRequest {
 	req.ReadinessIdle = strings.TrimSpace(req.ReadinessIdle)
 	req.Selectors = normalizeStrings(req.Selectors)
 	req.SelectorsAll = normalizeStrings(req.SelectorsAll)
+	req.Auth = normalizeCaptureAuth(req.Auth)
+	req.Guards = normalizeCaptureGuards(req.Guards)
 	return req
 }
 
@@ -444,7 +506,172 @@ func validateCaptureRequest(req CaptureRequest) error {
 	if err := validateTileOptions(req); err != nil {
 		return err
 	}
+	if err := validateCaptureAuth(req.Auth); err != nil {
+		return err
+	}
+	if err := validateCaptureGuards(req.Guards); err != nil {
+		return err
+	}
 	return validateTargetMode(req)
+}
+
+func normalizeCaptureAuth(auth CaptureAuth) CaptureAuth {
+	auth.CookieJar = strings.TrimSpace(auth.CookieJar)
+	auth.StorageState = strings.TrimSpace(auth.StorageState)
+	auth.Headers = normalizeCaptureHeaders(auth.Headers)
+	auth.Cookies = normalizeCaptureCookies(auth.Cookies)
+	return auth
+}
+
+func normalizeCaptureHeaders(headers []CaptureHeader) []CaptureHeader {
+	if len(headers) == 0 {
+		return nil
+	}
+	merged := map[string]CaptureHeader{}
+	order := make([]string, 0, len(headers))
+	for _, header := range headers {
+		header.Name = strings.TrimSpace(header.Name)
+		if header.Name == "" {
+			continue
+		}
+		key := strings.ToLower(header.Name)
+		if _, exists := merged[key]; !exists {
+			order = append(order, key)
+		}
+		merged[key] = header
+	}
+	out := make([]CaptureHeader, 0, len(order))
+	for _, key := range order {
+		out = append(out, merged[key])
+	}
+	return out
+}
+
+func normalizeCaptureCookies(cookies []CaptureCookie) []CaptureCookie {
+	if len(cookies) == 0 {
+		return nil
+	}
+	merged := map[string]CaptureCookie{}
+	order := make([]string, 0, len(cookies))
+	for _, cookie := range cookies {
+		cookie.Name = strings.TrimSpace(cookie.Name)
+		cookie.Domain = strings.TrimSpace(cookie.Domain)
+		cookie.Path = strings.TrimSpace(cookie.Path)
+		if sameSite := normalizeSameSite(cookie.SameSite); sameSite != "" {
+			cookie.SameSite = sameSite
+		} else {
+			cookie.SameSite = strings.TrimSpace(cookie.SameSite)
+		}
+		if cookie.Name == "" {
+			continue
+		}
+		key := strings.ToLower(cookie.Name) + "\x00" + strings.ToLower(cookie.Domain) + "\x00" + cookie.Path
+		if _, exists := merged[key]; !exists {
+			order = append(order, key)
+		}
+		merged[key] = cookie
+	}
+	out := make([]CaptureCookie, 0, len(order))
+	for _, key := range order {
+		out = append(out, merged[key])
+	}
+	return out
+}
+
+func normalizeCaptureGuards(guards CaptureGuards) CaptureGuards {
+	guards.ExpectURL = strings.TrimSpace(guards.ExpectURL)
+	guards.FailOnURL = normalizeStrings(guards.FailOnURL)
+	guards.FailOnSelector = normalizeStrings(guards.FailOnSelector)
+	return guards
+}
+
+func validateCaptureAuth(auth CaptureAuth) error {
+	if auth.CookieJar != "" {
+		if _, err := os.Stat(auth.CookieJar); err != nil {
+			return newCaptureError(CodeValidation, "normalize_request", "cookie_jar file is not readable", err).
+				WithMetadata("field", "auth.cookie_jar").
+				WithMetadata("path", auth.CookieJar)
+		}
+	}
+	if auth.StorageState != "" {
+		if _, err := os.Stat(auth.StorageState); err != nil {
+			return newCaptureError(CodeValidation, "normalize_request", "storage_state file is not readable", err).
+				WithMetadata("field", "auth.storage_state").
+				WithMetadata("path", auth.StorageState)
+		}
+	}
+	for _, header := range auth.Headers {
+		if !validHeaderName(header.Name) {
+			return newCaptureError(CodeValidation, "normalize_request", "invalid auth header name", nil).
+				WithMetadata("field", "auth.headers.name").
+				WithMetadata("header", header.Name)
+		}
+	}
+	for _, cookie := range auth.Cookies {
+		if cookie.Name == "" {
+			return newCaptureError(CodeValidation, "normalize_request", "auth cookie name is required", nil).
+				WithMetadata("field", "auth.cookies.name")
+		}
+		if strings.ContainsAny(cookie.Name, ";\r\n\t ") {
+			return newCaptureError(CodeValidation, "normalize_request", "invalid auth cookie name", nil).
+				WithMetadata("field", "auth.cookies.name").
+				WithMetadata("cookie", cookie.Name)
+		}
+		if cookie.Path != "" && !strings.HasPrefix(cookie.Path, "/") {
+			return newCaptureError(CodeValidation, "normalize_request", "auth cookie path must start with /", nil).
+				WithMetadata("field", "auth.cookies.path").
+				WithMetadata("cookie", cookie.Name)
+		}
+		if cookie.SameSite != "" && normalizeSameSite(cookie.SameSite) == "" {
+			return newCaptureError(CodeValidation, "normalize_request", "auth cookie sameSite must be strict, lax, or none", nil).
+				WithMetadata("field", "auth.cookies.sameSite").
+				WithMetadata("cookie", cookie.Name)
+		}
+	}
+	return nil
+}
+
+func validateCaptureGuards(guards CaptureGuards) error {
+	for _, value := range guards.FailOnURL {
+		if strings.TrimSpace(value) == "" {
+			return newCaptureError(CodeValidation, "normalize_request", "fail_on_url guard must not be empty", nil).
+				WithMetadata("field", "guards.fail_on_url")
+		}
+	}
+	for _, value := range guards.FailOnSelector {
+		if strings.TrimSpace(value) == "" {
+			return newCaptureError(CodeValidation, "normalize_request", "fail_on_selector guard must not be empty", nil).
+				WithMetadata("field", "guards.fail_on_selector")
+		}
+	}
+	return nil
+}
+
+func validHeaderName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, r := range name {
+		if r <= 32 || r >= 127 || strings.ContainsRune("()<>@,;:\\\"/[]?={} \t", r) {
+			return false
+		}
+	}
+	return true
+}
+
+func normalizeSameSite(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "":
+		return ""
+	case "strict":
+		return "Strict"
+	case "lax":
+		return "Lax"
+	case "none":
+		return "None"
+	default:
+		return ""
+	}
 }
 
 func normalizeTileOptions(req *CaptureRequest) {
@@ -597,6 +824,31 @@ func (req CaptureRequest) Normalization(outputGenerated bool, outputBaseName, ou
 	}
 }
 
+func (req CaptureRequest) Redacted() CaptureRequest {
+	req.Auth = req.Auth.Redacted()
+	return req
+}
+
+func (a CaptureAuth) Redacted() CaptureAuth {
+	a.CookieJar = strings.TrimSpace(a.CookieJar)
+	a.StorageState = strings.TrimSpace(a.StorageState)
+	for i := range a.Headers {
+		a.Headers[i].Name = strings.TrimSpace(a.Headers[i].Name)
+		if a.Headers[i].Name != "" {
+			a.Headers[i].Value = redactedSecretValue
+		}
+	}
+	for i := range a.Cookies {
+		a.Cookies[i].Name = strings.TrimSpace(a.Cookies[i].Name)
+		if a.Cookies[i].Name != "" {
+			a.Cookies[i].Value = redactedSecretValue
+		}
+	}
+	return a
+}
+
+const redactedSecretValue = "[redacted]"
+
 func ParseDurationOrDefault(raw string, fallback time.Duration) (time.Duration, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -746,6 +998,13 @@ func cloneWarnings(warnings []CaptureWarning) []CaptureWarning {
 		out[i].Metadata = cloneAnyMap(warning.Metadata)
 	}
 	return out
+}
+
+func cloneGuardOutcomes(outcomes []GuardOutcome) []GuardOutcome {
+	if len(outcomes) == 0 {
+		return nil
+	}
+	return append([]GuardOutcome(nil), outcomes...)
 }
 
 func cloneAnyMap(values map[string]any) map[string]any {

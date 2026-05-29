@@ -421,6 +421,7 @@ func synthesizeWorkflowCaptureRequest(scenario WorkflowScenario, screen Workflow
 	request.OutputPath = filepath.Join(scenario.Artifacts.CurrentDir, screen.OutputName+"."+defaultImageFormat)
 	request.MetadataPath = request.OutputPath + ".json"
 	applyWorkflowCaptureDefaults(&request, scenario.Defaults)
+	request.Auth = resolveCaptureAuthPaths(scenario.SourceDir, request.Auth)
 	request.BeforeNavigateJS = buildWorkflowHookScript(scenario, screen, "before_navigate", request)
 	request.AfterNavigateJS = buildWorkflowHookScript(scenario, screen, "after_navigate", request)
 	request.BeforeCaptureJS = buildWorkflowHookScript(scenario, screen, "before_capture", request)
@@ -471,6 +472,8 @@ func applyWorkflowCaptureDefaults(request *CaptureRequest, defaults WorkflowDefa
 	if request.WaitForFunction == "" {
 		request.WaitForFunction = defaults.WaitForFunction
 	}
+	request.Auth = mergeCaptureAuth(defaults.Auth, request.Auth)
+	request.Guards = mergeCaptureGuards(defaults.Guards, request.Guards)
 	if request.OversizePolicy == "" {
 		request.OversizePolicy = defaults.OversizePolicy
 	}

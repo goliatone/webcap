@@ -355,10 +355,7 @@ func absChannelDelta(a, b uint8) float64 {
 }
 
 func mutedPixel(value color.NRGBA) color.NRGBA {
-	grayValue := (uint16(value.R) + uint16(value.G) + uint16(value.B)) / 3
-	if grayValue > 255 {
-		grayValue = 255
-	}
+	grayValue := min((uint16(value.R)+uint16(value.G)+uint16(value.B))/3, 255)
 	gray := uint8(grayValue)
 	alpha := value.A
 	if alpha == 0 {

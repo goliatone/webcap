@@ -118,9 +118,10 @@ func (s *Service) persistEngineResult(resolved CaptureRequest, outputBaseName st
 		Browser:        engineResult.Browser,
 		Timing:         engineResult.Timing,
 		Warnings:       cloneWarnings(engineResult.Warnings),
+		Guards:         cloneGuardOutcomes(engineResult.Guards),
 		Tiling:         engineResult.Tiling,
 		Normalization:  resolved.Normalization(outputGenerated, outputBaseName, filepath.Dir(resolved.OutputPath)),
-		ResolvedConfig: resolved,
+		ResolvedConfig: resolved.Redacted(),
 	}
 	if result.Tiling != nil {
 		result.Tiling.MetadataPath = resolved.MetadataPath

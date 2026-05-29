@@ -81,22 +81,30 @@ func TestServiceCaptureRedactsResolvedConfigMetadata(t *testing.T) {
 				Viewport:    Viewport{Width: 1440, Height: 1200, ScaleFactor: 1},
 			},
 			Browser: BrowserInfo{Engine: "stub", Headless: true},
-			Timing: CaptureTiming{
-				CapturedAt: time.Unix(12, 0).UTC(),
+				Timing: CaptureTiming{
+					CapturedAt: time.Unix(12, 0).UTC(),
+				},
+				Guards: []GuardOutcome{{
+					Kind:     "expect_url",
+					Value:    "/admin",
+					FinalURL: "http://localhost:3000/admin",
+					Matched:  true,
+					Status:   "passed",
+				}},
 			},
-		},
-	}
+		}
 	service := NewService(engine)
 	dir := t.TempDir()
 	result, err := service.Capture(context.Background(), CaptureRequest{
 		URL:        "http://localhost:3000/admin",
 		FullPage:   true,
 		OutputPath: dir + "/capture.png",
-		Auth: CaptureAuth{
-			Headers: []CaptureHeader{{Name: "Authorization", Value: "Bearer raw-token"}},
-			Cookies: []CaptureCookie{{Name: "sid", Value: "raw-cookie", Path: "/"}},
-		},
-	})
+			Auth: CaptureAuth{
+				Headers: []CaptureHeader{{Name: "Authorization", Value: "Bearer raw-token"}},
+				Cookies: []CaptureCookie{{Name: "sid", Value: "raw-cookie", Path: "/"}},
+			},
+			Guards: CaptureGuards{ExpectURL: "/admin"},
+		})
 	if err != nil {
 		t.Fatalf("Capture returned error: %v", err)
 	}
@@ -107,10 +115,20 @@ func TestServiceCaptureRedactsResolvedConfigMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read metadata: %v", err)
 	}
-	if bytes.Contains(payload, []byte("raw-token")) || bytes.Contains(payload, []byte("raw-cookie")) {
-		t.Fatalf("metadata leaked auth secrets: %s", payload)
+		if bytes.Contains(payload, []byte("raw-token")) || bytes.Contains(payload, []byte("raw-cookie")) {
+			t.Fatalf("metadata leaked auth secrets: %s", payload)
+		}
+		if len(result.Guards) != 1 || result.Guards[0].Kind != "expect_url" || result.Guards[0].Status != "passed" {
+			t.Fatalf("guard outcomes were not copied to result: %#v", result.Guards)
+		}
+		var metadata CaptureResult
+		if err := json.Unmarshal(payload, &metadata); err != nil {
+			t.Fatalf("metadata JSON invalid: %v", err)
+		}
+		if len(metadata.Guards) != 1 || metadata.Guards[0].FinalURL != "http://localhost:3000/admin" {
+			t.Fatalf("metadata missing guard outcomes: %#v", metadata.Guards)
+		}
 	}
-}
 
 func TestServiceCapturePersistsTileArtifactsAndMetadata(t *testing.T) {
 	engine := stubEngine{result: tiledEngineResult([]byte("tile-a"), []byte("tile-b"))}

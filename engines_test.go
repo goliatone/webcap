@@ -3,8 +3,10 @@ package webcap
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -176,6 +178,266 @@ func TestChromiumStorageStateRejectsOriginStorageWithoutLeakingValues(t *testing
 	if !errors.As(err, &captureErr) || captureErr.Code != CodeUnsupported || captureErr.Metadata["engine"] != "chromium" {
 		t.Fatalf("unexpected storage state error: %+v", err)
 	}
+}
+
+func TestChromiumAuthGuardedProtectedRouteCapture(t *testing.T) {
+	server := newAuthGuardedCaptureServer(t)
+	engine := NewChromiumEngine(ChromiumOptions{Headless: true})
+	targetURL := server.URL + "/admin/translations/queue"
+
+	t.Run("cookie jar unlocks protected route", func(t *testing.T) {
+		result, err := engine.Capture(context.Background(), CaptureRequest{
+			URL: targetURL,
+			Auth: CaptureAuth{
+				CookieJar: writeAuthCookieJar(t, server.URL),
+			},
+			Guards:  authGuardedCaptureGuards(),
+			Timeout: "5s",
+		})
+		if err != nil {
+			skipIfChromiumUnavailable(t, err)
+			t.Fatalf("Capture returned error: %v", err)
+		}
+		assertProtectedCaptureResult(t, result)
+	})
+
+	t.Run("header unlocks protected route", func(t *testing.T) {
+		result, err := engine.Capture(context.Background(), CaptureRequest{
+			URL: targetURL,
+			Auth: CaptureAuth{
+				Headers: []CaptureHeader{{Name: "Authorization", Value: "Bearer test-token"}},
+			},
+			Guards:  authGuardedCaptureGuards(),
+			Timeout: "5s",
+		})
+		if err != nil {
+			skipIfChromiumUnavailable(t, err)
+			t.Fatalf("Capture returned error: %v", err)
+		}
+		assertProtectedCaptureResult(t, result)
+	})
+
+	t.Run("storage state cookies unlock protected route", func(t *testing.T) {
+		result, err := engine.Capture(context.Background(), CaptureRequest{
+			URL: targetURL,
+			Auth: CaptureAuth{
+				StorageState: writeAuthStorageState(t, server.URL),
+			},
+			Guards:  authGuardedCaptureGuards(),
+			Timeout: "5s",
+		})
+		if err != nil {
+			skipIfChromiumUnavailable(t, err)
+			t.Fatalf("Capture returned error: %v", err)
+		}
+		assertProtectedCaptureResult(t, result)
+	})
+}
+
+func TestChromiumAuthGuardedCaptureGuardFailures(t *testing.T) {
+	server := newAuthGuardedCaptureServer(t)
+	engine := NewChromiumEngine(ChromiumOptions{Headless: true})
+	targetURL := server.URL + "/admin/translations/queue"
+
+	t.Run("URL guard fails login redirect", func(t *testing.T) {
+		_, err := engine.Capture(context.Background(), CaptureRequest{
+			URL: targetURL,
+			Guards: CaptureGuards{
+				FailOnURL: []string{"/admin/login"},
+			},
+			Timeout: "5s",
+		})
+		if err != nil {
+			skipIfChromiumUnavailable(t, err)
+		}
+		var captureErr *Error
+		if !errors.As(err, &captureErr) || captureErr.Operation != "verify_url_guard" || captureErr.Metadata["fail_on_url"] != "/admin/login" {
+			t.Fatalf("unexpected URL guard error: %+v", err)
+		}
+	})
+
+	t.Run("selector guard fails visible login form", func(t *testing.T) {
+		_, err := engine.Capture(context.Background(), CaptureRequest{
+			URL: targetURL,
+			Guards: CaptureGuards{
+				FailOnSelector: []string{"form.login"},
+			},
+			Timeout: "5s",
+		})
+		if err != nil {
+			skipIfChromiumUnavailable(t, err)
+		}
+		var captureErr *Error
+		if !errors.As(err, &captureErr) || captureErr.Operation != "verify_selector_guard" || captureErr.Metadata["selector"] != "form.login" {
+			t.Fatalf("unexpected selector guard error: %+v", err)
+		}
+	})
+}
+
+func TestPlaywrightAuthGuardedProtectedRouteCapture(t *testing.T) {
+	server := newAuthGuardedCaptureServer(t)
+	engine := newTestPlaywrightRuntimeEngine(t)
+	targetURL := server.URL + "/admin/translations/queue"
+
+	tests := []struct {
+		name string
+		auth CaptureAuth
+	}{
+		{
+			name: "cookie jar unlocks protected route",
+			auth: CaptureAuth{CookieJar: writeAuthCookieJar(t, server.URL)},
+		},
+		{
+			name: "header unlocks protected route",
+			auth: CaptureAuth{Headers: []CaptureHeader{{Name: "Authorization", Value: "Bearer test-token"}}},
+		},
+		{
+			name: "storage state unlocks protected route",
+			auth: CaptureAuth{StorageState: writeAuthStorageState(t, server.URL)},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := engine.Capture(context.Background(), CaptureRequest{
+				URL:     targetURL,
+				Auth:    tt.auth,
+				Guards:  authGuardedCaptureGuards(),
+				Timeout: "5s",
+			})
+			if err != nil {
+				skipIfPlaywrightRuntimeUnavailable(t, err)
+				t.Fatalf("Capture returned error: %v", err)
+			}
+			assertProtectedCaptureResult(t, result)
+		})
+	}
+}
+
+func TestPlaywrightAuthGuardedCaptureGuardFailures(t *testing.T) {
+	server := newAuthGuardedCaptureServer(t)
+	engine := newTestPlaywrightRuntimeEngine(t)
+	targetURL := server.URL + "/admin/translations/queue"
+
+	t.Run("URL guard fails login redirect", func(t *testing.T) {
+		_, err := engine.Capture(context.Background(), CaptureRequest{
+			URL: targetURL,
+			Guards: CaptureGuards{
+				FailOnURL: []string{"/admin/login"},
+			},
+			Timeout: "5s",
+		})
+		if err != nil {
+			skipIfPlaywrightRuntimeUnavailable(t, err)
+		}
+		var captureErr *Error
+		if !errors.As(err, &captureErr) || captureErr.Operation != "verify_url_guard" || captureErr.Metadata["fail_on_url"] != "/admin/login" {
+			t.Fatalf("unexpected URL guard error: %+v", err)
+		}
+	})
+
+	t.Run("selector guard fails visible login form", func(t *testing.T) {
+		_, err := engine.Capture(context.Background(), CaptureRequest{
+			URL: targetURL,
+			Guards: CaptureGuards{
+				FailOnSelector: []string{"form.login"},
+			},
+			Timeout: "5s",
+		})
+		if err != nil {
+			skipIfPlaywrightRuntimeUnavailable(t, err)
+		}
+		var captureErr *Error
+		if !errors.As(err, &captureErr) || captureErr.Operation != "verify_selector_guard" || captureErr.Metadata["selector"] != "form.login" {
+			t.Fatalf("unexpected selector guard error: %+v", err)
+		}
+	})
+}
+
+func newAuthGuardedCaptureServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/admin/login":
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = w.Write([]byte(`<!doctype html><html><body><form class="login" action="/admin/login"><input name="identifier"></form></body></html>`))
+		case "/admin/translations/queue":
+			if authGuardedRequestAuthenticated(r) {
+				w.Header().Set("Content-Type", "text/html")
+				_, _ = w.Write([]byte(`<!doctype html><html><body><main id="queue">translations queue</main></body></html>`))
+				return
+			}
+			http.Redirect(w, r, "/admin/login", http.StatusFound)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+func authGuardedRequestAuthenticated(r *http.Request) bool {
+	if r.Header.Get("Authorization") == "Bearer test-token" {
+		return true
+	}
+	cookie, err := r.Cookie("sid")
+	return err == nil && cookie.Value == "test-session"
+}
+
+func authGuardedCaptureGuards() CaptureGuards {
+	return CaptureGuards{
+		ExpectURL:      "/admin/translations/queue",
+		FailOnURL:      []string{"/admin/login"},
+		FailOnSelector: []string{"form.login"},
+	}
+}
+
+func assertProtectedCaptureResult(t *testing.T, result EngineResult) {
+	t.Helper()
+	if !strings.Contains(result.Artifact.URL, "/admin/translations/queue") {
+		t.Fatalf("expected protected final URL, got %q", result.Artifact.URL)
+	}
+	if len(result.Artifact.Bytes) == 0 {
+		t.Fatal("expected screenshot bytes")
+	}
+	if len(result.Guards) != 3 {
+		t.Fatalf("expected three guard outcomes, got %#v", result.Guards)
+	}
+	for _, outcome := range result.Guards {
+		if outcome.Status != "passed" || outcome.FinalURL == "" {
+			t.Fatalf("unexpected guard outcome: %#v", outcome)
+		}
+	}
+}
+
+func writeAuthCookieJar(t *testing.T, baseURL string) string {
+	t.Helper()
+	host := authGuardedHost(t, baseURL)
+	path := filepath.Join(t.TempDir(), "cookies.txt")
+	payload := fmt.Sprintf("# Netscape HTTP Cookie File\n%s\tFALSE\t/\tFALSE\t1893456000\tsid\ttest-session\n", host)
+	if err := os.WriteFile(path, []byte(payload), 0o644); err != nil {
+		t.Fatalf("write cookie jar: %v", err)
+	}
+	return path
+}
+
+func writeAuthStorageState(t *testing.T, baseURL string) string {
+	t.Helper()
+	host := authGuardedHost(t, baseURL)
+	path := filepath.Join(t.TempDir(), "state.json")
+	payload := fmt.Sprintf(`{"cookies":[{"name":"sid","value":"test-session","domain":%q,"path":"/","expires":1893456000,"httpOnly":false,"secure":false,"sameSite":"Lax"}],"origins":[]}`, host)
+	if err := os.WriteFile(path, []byte(payload), 0o644); err != nil {
+		t.Fatalf("write storage state: %v", err)
+	}
+	return path
+}
+
+func authGuardedHost(t *testing.T, rawURL string) string {
+	t.Helper()
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		t.Fatalf("parse test server URL: %v", err)
+	}
+	return parsed.Hostname()
 }
 
 func TestPlaywrightRuntimeWaitForFunctionPredicateForms(t *testing.T) {

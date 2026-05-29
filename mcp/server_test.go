@@ -225,6 +225,38 @@ func TestCapturePageForwardsAuthAndGuards(t *testing.T) {
 	}
 }
 
+func TestCaptureSectionForwardsAuthAndGuards(t *testing.T) {
+	capture := &fakeCaptureService{captureResult: sampleCaptureResult("/tmp/section.png")}
+	server, err := NewServer(Config{
+		Name:    "webcap",
+		Version: "0.1.0",
+		Capture: capture,
+		Diff:    &fakeDiffService{result: sampleDiffResult()},
+		LoadManifest: func(string) (pkgwebcap.Manifest, error) {
+			return pkgwebcap.Manifest{}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewServer returned error: %v", err)
+	}
+	session := server.NewSession()
+	initializeSession(t, session)
+
+	resp := session.handle(context.Background(), []byte(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"capture_section","arguments":{"url":"http://localhost:3000/admin","selector":"#queue","auth":{"headers":[{"name":"Authorization","value":"Bearer secret"}]},"guards":{"expect_url":"/admin","fail_on_url":["/login"],"fail_on_selector":["form.login"]}}}}`))
+	if resp == nil || resp.Error != nil {
+		t.Fatalf("tools/call returned protocol error: %#v", resp)
+	}
+	if capture.lastCapture.Selector != "#queue" {
+		t.Fatalf("selector was not forwarded: %#v", capture.lastCapture)
+	}
+	if len(capture.lastCapture.Auth.Headers) != 1 || capture.lastCapture.Auth.Headers[0].Name != "Authorization" {
+		t.Fatalf("auth headers were not forwarded: %#v", capture.lastCapture.Auth)
+	}
+	if capture.lastCapture.Guards.ExpectURL != "/admin" || len(capture.lastCapture.Guards.FailOnURL) != 1 || len(capture.lastCapture.Guards.FailOnSelector) != 1 {
+		t.Fatalf("guards were not forwarded: %#v", capture.lastCapture.Guards)
+	}
+}
+
 func TestCaptureSectionForwardsWaitForFunction(t *testing.T) {
 	capture := &fakeCaptureService{captureResult: sampleCaptureResult("/tmp/out.png")}
 	server, err := NewServer(Config{

@@ -1,11 +1,27 @@
 # Changelog
 
+# [0.8.0](https://github.com/goliatone/webcap/compare/v0.7.0...v0.8.0) - (2026-05-29)
+
+## <!-- 1 -->🐛 Bug Fixes
+
+- Goreleaser setup ([3ab657d](https://github.com/goliatone/webcap/commit/3ab657de2dc5bd4dbb1340dcafd98313cb4140ac))  - (goliatone)
+- Code quality ([f9dfee6](https://github.com/goliatone/webcap/commit/f9dfee630b61c65842534d6fd0b6a38c3a8a60eb))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update tasks ([8d046a7](https://github.com/goliatone/webcap/commit/8d046a721183fa346208f0fa4fc1f601f54e4d0a))  - (goliatone)
+- Update tests ([bd6d5c2](https://github.com/goliatone/webcap/commit/bd6d5c2bf76786c8b96be198c60535be2b2db4b0))  - (goliatone)
+
 # [0.7.0](https://github.com/goliatone/webcap/compare/v0.6.1...v0.7.0) - (2026-05-29)
 
 ## <!-- 1 -->🐛 Bug Fixes
 
 - Remove linter suppressors ([d27a142](https://github.com/goliatone/webcap/commit/d27a142b5362c61388526d1d361646ef2a1d093c))  - (goliatone)
 - Code quality ([af81775](https://github.com/goliatone/webcap/commit/af817759e8658abdeb133c3c35ab3f0a540eae67))  - (goliatone)
+
+## <!-- 12 -->🔖 Releases
+
+- V0.7.0 ([90ac00c](https://github.com/goliatone/webcap/commit/90ac00c785b1848a1d890f79bc8f236260da0533))  - (goliatone)
 
 ## <!-- 16 -->➕ Add
 

@@ -58,7 +58,7 @@ func loadWorkflowScenario(path string, opts WorkflowOptions) (WorkflowScenario, 
 	if err != nil {
 		return WorkflowScenario{}, wrapCaptureError("load_workflow_scenario", err)
 	}
-	payload, err := os.ReadFile(absolutePath)
+	payload, err := os.ReadFile(absolutePath) // #nosec G304 -- workflow scenarios are explicit user-supplied files.
 	if err != nil {
 		return WorkflowScenario{}, wrapCaptureError("load_workflow_scenario", err)
 	}

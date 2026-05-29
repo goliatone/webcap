@@ -70,6 +70,30 @@ func TestServiceCaptureWritesNormalizationAndMetadata(t *testing.T) {
 	}
 }
 
+func TestWriteFileUsesRestrictivePermissions(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/nested/capture.json"
+	if err := writeFile(path, []byte("metadata")); err != nil {
+		t.Fatalf("writeFile returned error: %v", err)
+	}
+
+	dirInfo, err := os.Stat(dir + "/nested")
+	if err != nil {
+		t.Fatalf("stat output dir: %v", err)
+	}
+	if mode := dirInfo.Mode().Perm(); mode&0o002 != 0 || mode&0o020 != 0 {
+		t.Fatalf("output directory should not be writable by group/others: %o", mode)
+	}
+
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat output file: %v", err)
+	}
+	if mode := fileInfo.Mode().Perm(); mode&0o077 != 0 {
+		t.Fatalf("output file should be private to the owner: %o", mode)
+	}
+}
+
 func TestServiceCaptureRedactsResolvedConfigMetadata(t *testing.T) {
 	engine := stubEngine{
 		result: EngineResult{

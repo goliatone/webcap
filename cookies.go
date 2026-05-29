@@ -16,7 +16,7 @@ func ParseCookieJarFile(path string, now time.Time) ([]CaptureCookie, error) {
 	if path == "" {
 		return nil, nil
 	}
-	file, err := os.Open(path)
+	file, err := os.Open(path) // #nosec G304 -- cookie jars are explicit user-supplied browser export paths.
 	if err != nil {
 		return nil, newCaptureError(CodeValidation, "parse_cookie_jar", "cookie jar file is not readable", err).
 			WithMetadata("path", path)

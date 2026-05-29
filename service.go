@@ -295,10 +295,10 @@ func (s *Service) CaptureBatch(ctx context.Context, manifest Manifest, outputDir
 }
 
 func writeFile(path string, payload []byte) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return newCaptureError(CodeWrite, "write_file", "create output directory failed", err)
 	}
-	if err := os.WriteFile(path, payload, 0o644); err != nil {
+	if err := os.WriteFile(path, payload, 0o600); err != nil {
 		return newCaptureError(CodeWrite, "write_file", "write output file failed", err)
 	}
 	return nil

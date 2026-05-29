@@ -1591,7 +1591,7 @@ func (s *Service) buildWorkflowReportEntry(ctx context.Context, scenario Workflo
 		PrimaryStories:    workflowStoriesForIDs(scenario.Stories, screen.PrimaryStories),
 		SupportingStories: workflowStoriesForIDs(scenario.Stories, screen.SupportingStories),
 	}
-	if payload, readErr := os.ReadFile(currentMetadata); readErr == nil {
+	if payload, readErr := os.ReadFile(currentMetadata); readErr == nil { // #nosec G304 -- report metadata paths come from generated or configured capture artifacts.
 		var capture CaptureResult
 		if unmarshalErr := json.Unmarshal(payload, &capture); unmarshalErr == nil {
 			entry.CurrentCapture = &capture
@@ -2048,7 +2048,7 @@ func stageWorkflowReportAsset(reportDir, kind, sourcePath string) (string, error
 	if sourcePath == "" {
 		return "", nil
 	}
-	payload, err := os.ReadFile(sourcePath)
+	payload, err := os.ReadFile(sourcePath) // #nosec G304 -- report assets are explicit scenario/generated artifact paths staged into the report.
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", nil

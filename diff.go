@@ -244,7 +244,7 @@ func diffImagePair(basePath, comparePath string, threshold float64) (DiffEntry, 
 }
 
 func loadImage(path string) (image.Image, error) {
-	file, err := os.Open(path)
+	file, err := os.Open(path) // #nosec G304 -- diff inputs are explicit user-selected image paths.
 	if err != nil {
 		return nil, wrapCaptureError("open_diff_image", err)
 	}
@@ -355,7 +355,11 @@ func absChannelDelta(a, b uint8) float64 {
 }
 
 func mutedPixel(value color.NRGBA) color.NRGBA {
-	gray := uint8((uint16(value.R) + uint16(value.G) + uint16(value.B)) / 3)
+	grayValue := (uint16(value.R) + uint16(value.G) + uint16(value.B)) / 3
+	if grayValue > 255 {
+		grayValue = 255
+	}
+	gray := uint8(grayValue)
 	alpha := value.A
 	if alpha == 0 {
 		alpha = 255

@@ -1,7 +1,7 @@
 package webcap
 
 import (
-	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"net/url"
@@ -96,6 +96,6 @@ func sanitizeName(value string) string {
 }
 
 func selectorDigest(selectors []string) string {
-	sum := sha1.Sum([]byte(strings.Join(selectors, "|")))
+	sum := sha256.Sum256([]byte(strings.Join(selectors, "|")))
 	return hex.EncodeToString(sum[:])
 }

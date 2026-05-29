@@ -118,7 +118,7 @@ func (e *PlaywrightEngine) Capture(ctx context.Context, req CaptureRequest) (Eng
 
 	cmdCtx, cancel := context.WithTimeout(ctx, normalized.TimeoutDuration())
 	defer cancel()
-	cmd := exec.CommandContext(cmdCtx, e.opts.NodeBinary, e.opts.ScriptPath)
+	cmd := exec.CommandContext(cmdCtx, e.opts.NodeBinary, e.opts.ScriptPath) // #nosec G204 -- the Playwright backend intentionally executes configured local runtime binaries.
 	cmd.Dir = e.opts.RuntimeDir
 	cmd.Stdin = strings.NewReader(string(encoded))
 	output, err := cmd.CombinedOutput()

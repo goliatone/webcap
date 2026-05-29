@@ -15,7 +15,7 @@ func LoadManifest(path string) (Manifest, error) {
 	if path == "" {
 		return Manifest{}, newCaptureError(CodeManifest, "load_manifest", "manifest path is required", nil)
 	}
-	payload, err := os.ReadFile(path)
+	payload, err := os.ReadFile(path) // #nosec G304 -- manifests are explicit user-supplied configuration files.
 	if err != nil {
 		return Manifest{}, wrapCaptureError("load_manifest", err)
 	}

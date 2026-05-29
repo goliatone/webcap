@@ -21,7 +21,9 @@ func ParseCookieJarFile(path string, now time.Time) ([]CaptureCookie, error) {
 		return nil, newCaptureError(CodeValidation, "parse_cookie_jar", "cookie jar file is not readable", err).
 			WithMetadata("path", path)
 	}
-	defer file.Close()
+	defer func() {
+		_ = file.Close()
+	}()
 
 	var cookies []CaptureCookie
 	scanner := bufio.NewScanner(file)

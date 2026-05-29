@@ -61,11 +61,6 @@ func currentChromiumURL(ctx context.Context) (string, error) {
 	return strings.TrimSpace(finalURL), nil
 }
 
-func verifyChromiumSelectorGuards(ctx context.Context, guards CaptureGuards, finalURL string) error {
-	_, err := evaluateChromiumSelectorGuardOutcomes(ctx, guards, finalURL)
-	return err
-}
-
 func evaluateChromiumSelectorGuardOutcomes(ctx context.Context, guards CaptureGuards, finalURL string) ([]GuardOutcome, error) {
 	if len(guards.FailOnSelector) == 0 {
 		return nil, nil

@@ -36,7 +36,6 @@ GO_GOLANGCI_LINT_VERSION_FILE="${GO_GOLANGCI_LINT_VERSION_FILE:-.golangci-lint-v
 GO_GOVULNCHECK_VERSION="${GO_GOVULNCHECK_VERSION:-v1.1.4}"
 GO_GOSEC_VERSION="${GO_GOSEC_VERSION:-v2.25.0}"
 GO_GOSEC_EXCLUDE="${GO_GOSEC_EXCLUDE:-G703}"
-GO_GOSEC_EXCLUDE_RULES="${GO_GOSEC_EXCLUDE_RULES:-diff.go:G115,G304;service.go:G301,G306;manifest.go:G304;naming.go:G401,G505;playwright.go:G204;workflow.go:G304;workflow_report.go:G304}"
 GO_QUALITY_BASELINE_DIR="${GO_QUALITY_BASELINE_DIR:-$(pwd)/tools/quality/baselines}"
 GO_QUALITY_BASELINE_SCRIPT="${GO_QUALITY_BASELINE_SCRIPT:-$(pwd)/tools/quality/baseline.sh}"
 GO_QUALITY_GOCACHE="${GO_QUALITY_GOCACHE:-$(pwd)/.tmp/go-cache}"
@@ -775,9 +774,6 @@ function _go:security:gosec:module {
     if [ -n "${GO_GOSEC_EXCLUDE}" ]; then
         gosec_args+=("-exclude=${GO_GOSEC_EXCLUDE}")
     fi
-    if [ -n "${GO_GOSEC_EXCLUDE_RULES}" ]; then
-        gosec_args+=("-exclude-rules=${GO_GOSEC_EXCLUDE_RULES}")
-    fi
     if [ "$#" -gt 0 ]; then
         patterns=("$@")
     else
@@ -802,9 +798,6 @@ function _go:security:gosec:baseline:module {
     gosec_args=(-quiet -exclude-dir=.tmp)
     if [ -n "${GO_GOSEC_EXCLUDE}" ]; then
         gosec_args+=("-exclude=${GO_GOSEC_EXCLUDE}")
-    fi
-    if [ -n "${GO_GOSEC_EXCLUDE_RULES}" ]; then
-        gosec_args+=("-exclude-rules=${GO_GOSEC_EXCLUDE_RULES}")
     fi
     if [ "$#" -gt 0 ]; then
         patterns=("$@")
@@ -857,9 +850,6 @@ function _go:baseline:update:gosec:module {
     gosec_args=(-quiet -exclude-dir=.tmp)
     if [ -n "${GO_GOSEC_EXCLUDE}" ]; then
         gosec_args+=("-exclude=${GO_GOSEC_EXCLUDE}")
-    fi
-    if [ -n "${GO_GOSEC_EXCLUDE_RULES}" ]; then
-        gosec_args+=("-exclude-rules=${GO_GOSEC_EXCLUDE_RULES}")
     fi
     if [ "$#" -gt 0 ]; then
         patterns=("$@")

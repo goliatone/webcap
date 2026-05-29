@@ -136,7 +136,7 @@ func TestURLGuardVerification(t *testing.T) {
 	if len(outcomes) != 2 || outcomes[0].Kind != "expect_url" || !outcomes[0].Matched || outcomes[0].Status != "passed" || outcomes[1].Matched || outcomes[1].Status != "passed" {
 		t.Fatalf("unexpected URL guard outcomes: %#v", outcomes)
 	}
-	err := verifyURLGuards(CaptureGuards{ExpectURL: "/admin"}, "http://localhost:3000/login")
+	err = verifyURLGuards(CaptureGuards{ExpectURL: "/admin"}, "http://localhost:3000/login")
 	var captureErr *Error
 	if !errors.As(err, &captureErr) || captureErr.Operation != "verify_url_guard" || captureErr.Metadata["expect_url"] != "/admin" {
 		t.Fatalf("unexpected expect_url guard error: %+v", err)

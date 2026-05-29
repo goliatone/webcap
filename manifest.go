@@ -30,6 +30,12 @@ func LoadManifest(path string) (Manifest, error) {
 	if err != nil {
 		return Manifest{}, newCaptureError(CodeManifest, "load_manifest", "invalid manifest", err)
 	}
+	absolutePath, err := filepath.Abs(path)
+	if err != nil {
+		return Manifest{}, wrapCaptureError("load_manifest", err)
+	}
+	manifest.SourcePath = absolutePath
+	manifest.SourceDir = filepath.Dir(absolutePath)
 	if len(manifest.Shots) == 0 {
 		return Manifest{}, newCaptureError(CodeManifest, "load_manifest", "manifest must define at least one shot", nil)
 	}
@@ -66,6 +72,8 @@ func (m Manifest) Requests(outputDirOverride string) ([]CaptureRequest, error) {
 			ReducedMotion:     shot.ReducedMotion || m.ReducedMotion,
 			WaitForFonts:      shot.WaitForFonts || m.WaitForFonts,
 			Timeout:           firstNonEmpty(shot.Timeout, m.Timeout),
+			Auth:              resolveCaptureAuthPaths(m.SourceDir, mergeCaptureAuth(m.Auth, shot.Auth)),
+			Guards:            mergeCaptureGuards(m.Guards, shot.Guards),
 			OversizePolicy:    firstOversizePolicy(shot.OversizePolicy, m.OversizePolicy),
 			Tile:              mergeTileOptions(m.Tile, shot.Tile),
 		}
@@ -86,6 +94,42 @@ func (m Manifest) Requests(outputDirOverride string) ([]CaptureRequest, error) {
 		requests = append(requests, resolved)
 	}
 	return requests, nil
+}
+
+func mergeCaptureAuth(base, override CaptureAuth) CaptureAuth {
+	out := base
+	if strings.TrimSpace(override.CookieJar) != "" {
+		out.CookieJar = override.CookieJar
+	}
+	if strings.TrimSpace(override.StorageState) != "" {
+		out.StorageState = override.StorageState
+	}
+	out.Headers = append(append([]CaptureHeader(nil), base.Headers...), override.Headers...)
+	out.Cookies = append(append([]CaptureCookie(nil), base.Cookies...), override.Cookies...)
+	return normalizeCaptureAuth(out)
+}
+
+func mergeCaptureGuards(base, override CaptureGuards) CaptureGuards {
+	out := CaptureGuards{
+		ExpectURL:      firstNonEmpty(override.ExpectURL, base.ExpectURL),
+		FailOnURL:      append(append([]string(nil), base.FailOnURL...), override.FailOnURL...),
+		FailOnSelector: append(append([]string(nil), base.FailOnSelector...), override.FailOnSelector...),
+	}
+	return normalizeCaptureGuards(out)
+}
+
+func resolveCaptureAuthPaths(baseDir string, auth CaptureAuth) CaptureAuth {
+	auth.CookieJar = resolveOptionalPath(baseDir, auth.CookieJar)
+	auth.StorageState = resolveOptionalPath(baseDir, auth.StorageState)
+	return auth
+}
+
+func resolveOptionalPath(baseDir, value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || filepath.IsAbs(value) || baseDir == "" {
+		return value
+	}
+	return filepath.Clean(filepath.Join(baseDir, value))
 }
 
 func firstOversizePolicy(values ...OversizePolicy) OversizePolicy {

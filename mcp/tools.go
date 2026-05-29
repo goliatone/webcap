@@ -28,6 +28,8 @@ type capturePageArguments struct {
 	ReducedMotion     bool                         `json:"reduced_motion,omitempty"`
 	WaitForFonts      bool                         `json:"wait_for_fonts,omitempty"`
 	Timeout           string                       `json:"timeout,omitempty"`
+	Auth              pkgwebcap.CaptureAuth        `json:"auth,omitempty"`
+	Guards            pkgwebcap.CaptureGuards      `json:"guards,omitempty"`
 	Selector          string                       `json:"selector,omitempty"`
 	Selectors         []string                     `json:"selectors,omitempty"`
 	SelectorAll       string                       `json:"selector_all,omitempty"`
@@ -59,6 +61,8 @@ type captureSectionArguments struct {
 	ReducedMotion     bool                         `json:"reduced_motion,omitempty"`
 	WaitForFonts      bool                         `json:"wait_for_fonts,omitempty"`
 	Timeout           string                       `json:"timeout,omitempty"`
+	Auth              pkgwebcap.CaptureAuth        `json:"auth,omitempty"`
+	Guards            pkgwebcap.CaptureGuards      `json:"guards,omitempty"`
 	OversizePolicy    pkgwebcap.OversizePolicy     `json:"oversize_policy,omitempty"`
 	Tile              pkgwebcap.CaptureTileOptions `json:"tile"`
 }
@@ -109,6 +113,7 @@ type captureToolResult struct {
 	Viewport     pkgwebcap.Viewport         `json:"viewport"`
 	Browser      pkgwebcap.BrowserInfo      `json:"browser"`
 	Warnings     []pkgwebcap.CaptureWarning `json:"warnings,omitempty"`
+	Guards       []pkgwebcap.GuardOutcome   `json:"guards,omitempty"`
 	Tiling       *pkgwebcap.CaptureTiling   `json:"tiling,omitempty"`
 }
 
@@ -164,6 +169,8 @@ func (a capturePageArguments) captureRequest() pkgwebcap.CaptureRequest {
 		ReducedMotion:     a.ReducedMotion,
 		WaitForFonts:      a.WaitForFonts,
 		Timeout:           strings.TrimSpace(a.Timeout),
+		Auth:              a.Auth,
+		Guards:            a.Guards,
 		OversizePolicy:    a.OversizePolicy,
 		Tile:              a.Tile,
 	}
@@ -193,6 +200,8 @@ func (a captureSectionArguments) captureRequest() pkgwebcap.CaptureRequest {
 		ReducedMotion:     a.ReducedMotion,
 		WaitForFonts:      a.WaitForFonts,
 		Timeout:           strings.TrimSpace(a.Timeout),
+		Auth:              a.Auth,
+		Guards:            a.Guards,
 		OversizePolicy:    a.OversizePolicy,
 		Tile:              a.Tile,
 	}
@@ -250,6 +259,7 @@ func summarizeCaptureResult(result pkgwebcap.CaptureResult) captureToolResult {
 		Viewport:     result.Artifact.Viewport,
 		Browser:      result.Browser,
 		Warnings:     append([]pkgwebcap.CaptureWarning(nil), result.Warnings...),
+		Guards:       append([]pkgwebcap.GuardOutcome(nil), result.Guards...),
 		Tiling:       result.Tiling,
 	}
 }
@@ -330,6 +340,14 @@ func errorToolResult(toolName string, err error) (callToolResult, error) {
 			structured["result"] = summarizeCaptureResult(*partialErr.Result)
 		}
 	}
+	var captureErr *pkgwebcap.Error
+	if partialErr == nil && errors.As(err, &captureErr) {
+		structured["code"] = string(captureErr.Code)
+		structured["operation"] = captureErr.Operation
+		if len(captureErr.Metadata) > 0 {
+			structured["metadata"] = captureErr.Metadata
+		}
+	}
 	return callToolResult{
 		Content: []textContent{
 			{Type: "text", Text: message},
@@ -359,6 +377,7 @@ func captureToolOutputSchema() map[string]any {
 			"mode":          map[string]any{"type": "string"},
 			"url":           map[string]any{"type": "string"},
 			"engine":        map[string]any{"type": "string"},
+			"guards":        map[string]any{"type": "array"},
 			"tiling":        map[string]any{"type": "object"},
 		},
 		"required": []string{"output_path", "mode", "url", "engine"},
@@ -420,6 +439,8 @@ func capturePageTool(outputSchema map[string]any) tool {
 				"reduced_motion":     map[string]any{"type": "boolean"},
 				"wait_for_fonts":     map[string]any{"type": "boolean"},
 				"timeout":            map[string]any{"type": "string"},
+				"auth":               authSchema(),
+				"guards":             guardsSchema(),
 				"oversize_policy":    map[string]any{"type": "string", "enum": []string{"fail", "tile"}},
 				"tile":               tileSchema(),
 			},
@@ -460,6 +481,8 @@ func captureSectionTool(outputSchema map[string]any) tool {
 				"reduced_motion":     map[string]any{"type": "boolean"},
 				"wait_for_fonts":     map[string]any{"type": "boolean"},
 				"timeout":            map[string]any{"type": "string"},
+				"auth":               authSchema(),
+				"guards":             guardsSchema(),
 				"oversize_policy":    map[string]any{"type": "string", "enum": []string{"fail", "tile"}},
 				"tile":               tileSchema(),
 			},
@@ -580,6 +603,55 @@ func tileSchema() map[string]any {
 			"stitch":              map[string]any{"type": "boolean"},
 			"max_stitched_pixels": map[string]any{"type": "integer"},
 			"cleanup_tiles":       map[string]any{"type": "boolean"},
+		},
+	}
+}
+
+func authSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"cookie_jar":    map[string]any{"type": "string"},
+			"storage_state": map[string]any{"type": "string"},
+			"headers": map[string]any{
+				"type": "array",
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"name":  map[string]any{"type": "string"},
+						"value": map[string]any{"type": "string"},
+					},
+					"required": []string{"name", "value"},
+				},
+			},
+			"cookies": map[string]any{
+				"type": "array",
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"name":     map[string]any{"type": "string"},
+						"value":    map[string]any{"type": "string"},
+						"domain":   map[string]any{"type": "string"},
+						"path":     map[string]any{"type": "string"},
+						"secure":   map[string]any{"type": "boolean"},
+						"httpOnly": map[string]any{"type": "boolean"},
+						"sameSite": map[string]any{"type": "string"},
+						"expires":  map[string]any{"type": "integer"},
+					},
+					"required": []string{"name", "value"},
+				},
+			},
+		},
+	}
+}
+
+func guardsSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"expect_url":       map[string]any{"type": "string"},
+			"fail_on_url":      stringArraySchema(),
+			"fail_on_selector": stringArraySchema(),
 		},
 	}
 }

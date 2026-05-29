@@ -28,8 +28,8 @@ type capturePageArguments struct {
 	ReducedMotion     bool                         `json:"reduced_motion,omitempty"`
 	WaitForFonts      bool                         `json:"wait_for_fonts,omitempty"`
 	Timeout           string                       `json:"timeout,omitempty"`
-	Auth              pkgwebcap.CaptureAuth        `json:"auth,omitempty"`
-	Guards            pkgwebcap.CaptureGuards      `json:"guards,omitempty"`
+	Auth              pkgwebcap.CaptureAuth        `json:"auth"`
+	Guards            pkgwebcap.CaptureGuards      `json:"guards"`
 	Selector          string                       `json:"selector,omitempty"`
 	Selectors         []string                     `json:"selectors,omitempty"`
 	SelectorAll       string                       `json:"selector_all,omitempty"`
@@ -61,8 +61,8 @@ type captureSectionArguments struct {
 	ReducedMotion     bool                         `json:"reduced_motion,omitempty"`
 	WaitForFonts      bool                         `json:"wait_for_fonts,omitempty"`
 	Timeout           string                       `json:"timeout,omitempty"`
-	Auth              pkgwebcap.CaptureAuth        `json:"auth,omitempty"`
-	Guards            pkgwebcap.CaptureGuards      `json:"guards,omitempty"`
+	Auth              pkgwebcap.CaptureAuth        `json:"auth"`
+	Guards            pkgwebcap.CaptureGuards      `json:"guards"`
 	OversizePolicy    pkgwebcap.OversizePolicy     `json:"oversize_policy,omitempty"`
 	Tile              pkgwebcap.CaptureTileOptions `json:"tile"`
 }

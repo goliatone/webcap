@@ -24,7 +24,12 @@ builds:
     main: "./cmd/webcap"
     binary: "webcap"
     ldflags:
-      - -s -w
+      - >-
+        -s -w
+        -X github.com/goliatone/webcap/pkg/version.Tag={{ .Version }}
+        -X github.com/goliatone/webcap/pkg/version.Time={{ .Date }}
+        -X github.com/goliatone/webcap/pkg/version.User=goreleaser
+        -X github.com/goliatone/webcap/pkg/version.Commit={{ .FullCommit }}
 archives:
   - name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ if eq .Arch "amd64" }}x86_64{{ else if eq .Arch "386" }}i386{{ else }}{{ .Arch }}{{ end }}{{ with .Arm }}v{{ . }}{{ end }}'
 checksum:
@@ -51,6 +56,10 @@ brews:
     license: "MIT"
     test: |
       assert_predicate bin/"webcap", :exist?
+      output = shell_output("#{bin}/webcap version")
+      assert_match "Version:  #{version}", output
+      assert_match(/Build Commit Hash:\s+[0-9a-f]{40}/, output)
+      refute_match "Version:  dev", output
 nfpms:
   - id: webcap
     file_name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ if eq .Arch "amd64" }}x86_64{{ else if eq .Arch "386" }}i386{{ else }}{{ .Arch }}{{ end }}{{ with .Arm }}v{{ . }}{{ end }}'

@@ -145,6 +145,22 @@ func TestNormalizeCaptureRequestAuthGuardsAndRedaction(t *testing.T) {
 	}
 }
 
+func TestCaptureCookieHostOnlyIsSerializedForRuntimeBridge(t *testing.T) {
+	encoded, err := json.Marshal(CaptureCookie{
+		Name:     "session",
+		Value:    "cookie-secret",
+		Domain:   "example.test",
+		Path:     "/admin",
+		HostOnly: true,
+	})
+	if err != nil {
+		t.Fatalf("marshal cookie: %v", err)
+	}
+	if !strings.Contains(string(encoded), `"host_only":true`) {
+		t.Fatalf("host-only flag was not serialized: %s", encoded)
+	}
+}
+
 func TestNormalizeCaptureRequestRejectsBadAuthWithoutLeakingValues(t *testing.T) {
 	_, err := NormalizeCaptureRequest(CaptureRequest{
 		URL: "http://localhost:3000",

@@ -201,6 +201,69 @@ func TestRunAuthLoginCLIErrorRedactsScriptOutput(t *testing.T) {
 	}
 }
 
+func TestRunAuthInspectCLIHumanErrorIncludesDiagnostics(t *testing.T) {
+	dir := t.TempDir()
+	jarPath := filepath.Join(dir, "cookies.txt")
+	writeMainTestCookieJar(t, jarPath, []string{
+		"localhost\tFALSE\t/\tFALSE\t1893456000\tadmin_debug_session\tdebug-cookie-secret",
+	})
+
+	var stdout, stderr bytes.Buffer
+	code := runCLI(context.Background(), []string{
+		"auth", "inspect",
+		"--cookie-jar", jarPath,
+		"--url", "http://localhost:9090/admin/dashboard",
+		"--expect-cookie", "admin_session",
+	}, strings.NewReader(""), &stdout, &stderr)
+	if code == 0 {
+		t.Fatal("expected auth inspect failure")
+	}
+	output := stderr.String()
+	for _, expected := range []string{"Expected cookies:", "admin_session: missing", "debug_cookie_without_auth"} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("expected human error to contain %q, got:\n%s", expected, output)
+		}
+	}
+	if strings.Contains(output, "debug-cookie-secret") {
+		t.Fatalf("auth inspect human error leaked cookie value:\n%s", output)
+	}
+}
+
+func TestRunAuthLoginCLIHumanErrorIncludesScriptDiagnostics(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	dir := t.TempDir()
+	scriptPath := filepath.Join(dir, "login.sh")
+	if err := os.WriteFile(scriptPath, []byte("#!/usr/bin/env bash\necho \"missing CSRF token on login page\" >&2\necho \"password=$WEBCAP_PASSWORD\" >&2\nexit 4\n"), 0o700); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+	t.Setenv("ADMIN_PASSWORD", "cli-password-secret")
+
+	var stdout, stderr bytes.Buffer
+	code := runCLI(context.Background(), []string{
+		"auth", "login",
+		"--script", scriptPath,
+		"--base-url", "http://localhost:9090",
+		"--cookie-jar", filepath.Join(dir, "cookies.txt"),
+		"--identifier", "admin",
+		"--password-env", "ADMIN_PASSWORD",
+		"--expect-cookie", "admin_session",
+	}, strings.NewReader(""), &stdout, &stderr)
+	if code == 0 {
+		t.Fatal("expected auth login failure")
+	}
+	output := stderr.String()
+	for _, expected := range []string{"Script: custom exit=4", "Script stderr:", "missing CSRF token on login page", "password=[REDACTED]"} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("expected human error to contain %q, got:\n%s", expected, output)
+		}
+	}
+	if strings.Contains(output, "cli-password-secret") {
+		t.Fatalf("auth login human error leaked password:\n%s", output)
+	}
+}
+
 func TestRunVersionCLI(t *testing.T) {
 	oldTag, oldTime, oldUser, oldCommit := version.Tag, version.Time, version.User, version.Commit
 	t.Cleanup(func() {

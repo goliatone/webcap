@@ -2,6 +2,7 @@ package webcap
 
 import (
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -60,7 +61,7 @@ func TestGoReleaserPublishesHomebrewCask(t *testing.T) {
 	}
 
 	var config struct {
-		Brews         []any `yaml:"brews"`
+		Brews        []any `yaml:"brews"`
 		HomebrewCask []struct {
 			Name        string   `yaml:"name"`
 			Binaries    []string `yaml:"binaries"`
@@ -96,10 +97,5 @@ func TestGoReleaserPublishesHomebrewCask(t *testing.T) {
 }
 
 func containsString(values []string, expected string) bool {
-	for _, value := range values {
-		if value == expected {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(values, expected)
 }

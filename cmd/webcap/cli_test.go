@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	pkgwebcap "github.com/goliatone/webcap"
@@ -43,6 +45,116 @@ func TestParseShotCLI(t *testing.T) {
 	}
 	if invocation.Shot.Request.FullPage {
 		t.Fatal("expected selector capture to keep selector mode instead of defaulting to full-page")
+	}
+}
+
+func TestParseAuthInspectCLI(t *testing.T) {
+	invocation, err := parseCLI([]string{
+		"auth",
+		"inspect",
+		"--json",
+		"--cookie-jar", "cookies.txt",
+		"--url", "http://localhost:9090/admin/translations/queue",
+		"--expect-cookie", "admin_session",
+		"--expect-cookie", "admin_user",
+	})
+	if err != nil {
+		t.Fatalf("parseCLI returned error: %v", err)
+	}
+	if invocation.Command != "auth" || invocation.Auth.Action != "inspect" {
+		t.Fatalf("unexpected auth action: %#v", invocation.Auth)
+	}
+	req := invocation.Auth.Inspect
+	if req.CookieJar != "cookies.txt" || req.TargetURL != "http://localhost:9090/admin/translations/queue" {
+		t.Fatalf("unexpected inspect request: %#v", req)
+	}
+	if len(req.ExpectCookies) != 2 || req.ExpectCookies[0] != "admin_session" || req.ExpectCookies[1] != "admin_user" {
+		t.Fatalf("unexpected expected cookies: %#v", req.ExpectCookies)
+	}
+	if len(req.WarnDebugCookies) != 1 || req.WarnDebugCookies[0] != "admin_debug_session" {
+		t.Fatalf("unexpected debug cookie defaults: %#v", req.WarnDebugCookies)
+	}
+	if invocation.Output.Format != "json" {
+		t.Fatalf("expected json output context, got %s", invocation.Output.Format)
+	}
+}
+
+func TestParseAuthLoginCLI(t *testing.T) {
+	invocation, err := parseCLI([]string{
+		"auth",
+		"login",
+		"--script", "./custom-login.sh",
+		"--base-url", "http://localhost:9090",
+		"--target-url", "http://localhost:9090/admin/translations/queue",
+		"--cookie-jar", "/tmp/admin-cookies.txt",
+		"--identifier", "admin",
+		"--password-env", "ADMIN_PASSWORD",
+		"--expect-cookie", "admin_session",
+		"--timeout", "10s",
+	})
+	if err != nil {
+		t.Fatalf("parseCLI returned error: %v", err)
+	}
+	if invocation.Command != "auth" || invocation.Auth.Action != "login" {
+		t.Fatalf("unexpected auth action: %#v", invocation.Auth)
+	}
+	req := invocation.Auth.Login
+	if req.ScriptPath != "./custom-login.sh" || req.BaseURL != "http://localhost:9090" || req.LoginPath != pkgwebcap.DefaultAuthLoginPath {
+		t.Fatalf("unexpected login request defaults: %#v", req)
+	}
+	if req.TargetURL != "http://localhost:9090/admin/translations/queue" || req.CookieJar != "/tmp/admin-cookies.txt" {
+		t.Fatalf("unexpected login paths: %#v", req)
+	}
+	if req.Identifier != "admin" || req.PasswordEnv != "ADMIN_PASSWORD" {
+		t.Fatalf("unexpected credential contract: %#v", req)
+	}
+	if len(req.ExpectCookies) != 1 || req.ExpectCookies[0] != "admin_session" || req.Timeout != "10s" {
+		t.Fatalf("unexpected validation options: %#v", req)
+	}
+}
+
+func TestParseAuthCLIRejectsInvalidInputs(t *testing.T) {
+	tests := [][]string{
+		{"auth"},
+		{"auth", "whoami"},
+		{"auth", "inspect"},
+		{"auth", "inspect", "--cookie-jar", "cookies.txt", "--storage-state", "state.json"},
+		{"auth", "inspect", "--cookie-jar", "cookies.txt", "extra"},
+		{"auth", "login", "--cookie-jar", "cookies.txt", "--identifier", "admin", "--password-env", "ADMIN_PASSWORD", "--expect-cookie", "admin_session"},
+		{"auth", "login", "--base-url", "http://localhost:9090", "--identifier", "admin", "--password-env", "ADMIN_PASSWORD", "--expect-cookie", "admin_session"},
+		{"auth", "login", "--base-url", "http://localhost:9090", "--cookie-jar", "cookies.txt", "--password-env", "ADMIN_PASSWORD", "--expect-cookie", "admin_session"},
+		{"auth", "login", "--base-url", "http://localhost:9090", "--cookie-jar", "cookies.txt", "--identifier", "admin", "--expect-cookie", "admin_session"},
+		{"auth", "login", "--base-url", "http://localhost:9090", "--cookie-jar", "cookies.txt", "--identifier", "admin", "--password-env", "ADMIN_PASSWORD"},
+		{"auth", "login", "--base-url", "http://localhost:9090", "--cookie-jar", "cookies.txt", "--identifier", "admin", "--password-env", "ADMIN_PASSWORD", "--expect-cookie", "admin_session", "--timeout", "soon"},
+	}
+	for _, args := range tests {
+		if _, err := parseCLI(args); err == nil {
+			t.Fatalf("expected parse error for args %#v", args)
+		}
+	}
+}
+
+func TestAuthResultStructsMarshalStableJSON(t *testing.T) {
+	result := pkgwebcap.AuthInspectResult{
+		Command: "auth inspect",
+		Source:  pkgwebcap.AuthStateSource{Type: "cookie_jar", Path: "cookies.txt"},
+		Cookies: []pkgwebcap.AuthCookieDiagnostic{{
+			Name:            "admin_session",
+			Domain:          "localhost",
+			Path:            "/",
+			CaptureImportOK: true,
+		}},
+		ExpectedCookies: []pkgwebcap.AuthExpectedCookieStatus{{
+			Name:   "admin_session",
+			Status: "present",
+		}},
+	}
+	payload, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("auth result did not marshal: %v", err)
+	}
+	if string(payload) == "" || strings.Contains(string(payload), "value") || strings.Contains(string(payload), "password") {
+		t.Fatalf("auth result JSON should not expose secret-bearing fields: %s", payload)
 	}
 }
 

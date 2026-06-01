@@ -135,11 +135,15 @@ func TestURLGuardVerification(t *testing.T) {
 	if err != nil {
 		t.Fatalf("evaluateURLGuardOutcomes returned error: %v", err)
 	}
-	if len(outcomes) != 2 || outcomes[0].Kind != "expect_url" || !outcomes[0].Matched || outcomes[0].Status != "passed" || outcomes[1].Matched || outcomes[1].Status != "passed" {
+	if len(outcomes) != 2 || outcomes[0].Kind != "fail_on_url" || outcomes[0].Matched || outcomes[0].Status != "passed" || outcomes[1].Kind != "expect_url" || !outcomes[1].Matched || outcomes[1].Status != "passed" {
 		t.Fatalf("unexpected URL guard outcomes: %#v", outcomes)
 	}
-	err = verifyURLGuards(CaptureGuards{ExpectURL: "/admin"}, "http://localhost:3000/login")
+	err = verifyURLGuards(CaptureGuards{ExpectURL: "/admin/translations/queue", FailOnURL: []string{"/admin/login"}}, "http://localhost:3000/admin/login")
 	var captureErr *Error
+	if !errors.As(err, &captureErr) || captureErr.Operation != "verify_url_guard" || captureErr.Metadata["guard"] != "fail_on_url" || captureErr.Metadata["fail_on_url"] != "/admin/login" {
+		t.Fatalf("expected fail_on_url priority error, got %+v", err)
+	}
+	err = verifyURLGuards(CaptureGuards{ExpectURL: "/admin"}, "http://localhost:3000/login")
 	if !errors.As(err, &captureErr) || captureErr.Operation != "verify_url_guard" || captureErr.Metadata["expect_url"] != "/admin" {
 		t.Fatalf("unexpected expect_url guard error: %+v", err)
 	}
@@ -243,6 +247,7 @@ func TestChromiumAuthGuardedCaptureGuardFailures(t *testing.T) {
 		_, err := engine.Capture(context.Background(), CaptureRequest{
 			URL: targetURL,
 			Guards: CaptureGuards{
+				ExpectURL: "/admin/translations/queue",
 				FailOnURL: []string{"/admin/login"},
 			},
 			Timeout: "5s",
@@ -322,6 +327,7 @@ func TestPlaywrightAuthGuardedCaptureGuardFailures(t *testing.T) {
 		_, err := engine.Capture(context.Background(), CaptureRequest{
 			URL: targetURL,
 			Guards: CaptureGuards{
+				ExpectURL: "/admin/translations/queue",
 				FailOnURL: []string{"/admin/login"},
 			},
 			Timeout: "5s",

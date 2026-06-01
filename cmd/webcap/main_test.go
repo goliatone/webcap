@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -39,6 +40,7 @@ func TestRunHelpCLI(t *testing.T) {
 		"webcap help",
 		"webcap version",
 		"webcap shot [flags] <url>",
+		"webcap auth inspect [flags]",
 		"webcap mcp serve [flags]",
 		"webcap skill install [flags] --agent <codex|claude>",
 		"--wait-for-function",
@@ -46,6 +48,156 @@ func TestRunHelpCLI(t *testing.T) {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("expected help output to contain %q, got:\n%s", expected, output)
 		}
+	}
+}
+
+func TestRunAuthInspectCLI(t *testing.T) {
+	dir := t.TempDir()
+	jarPath := filepath.Join(dir, "cookies.txt")
+	writeMainTestCookieJar(t, jarPath, []string{
+		"localhost\tFALSE\t/admin\tFALSE\t1893456000\tadmin_session\tsecret-value",
+	})
+
+	var stdout, stderr bytes.Buffer
+	code := runCLI(context.Background(), []string{
+		"auth", "inspect",
+		"--cookie-jar", jarPath,
+		"--url", "http://localhost:9090/admin/dashboard",
+		"--expect-cookie", "admin_session",
+	}, strings.NewReader(""), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("expected auth inspect to succeed, stderr:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, expected := range []string{"Auth inspect complete", "Expected cookies:", "admin_session: present"} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("expected output %q, got:\n%s", expected, output)
+		}
+	}
+	if strings.Contains(output, "secret-value") {
+		t.Fatalf("auth inspect leaked cookie value:\n%s", output)
+	}
+}
+
+func TestRunAuthInspectCLIJSON(t *testing.T) {
+	dir := t.TempDir()
+	jarPath := filepath.Join(dir, "cookies.txt")
+	writeMainTestCookieJar(t, jarPath, []string{
+		"localhost\tFALSE\t/admin\tFALSE\t1893456000\tadmin_session\tsecret-value",
+	})
+
+	var stdout, stderr bytes.Buffer
+	code := runCLI(context.Background(), []string{
+		"auth", "inspect",
+		"--json",
+		"--cookie-jar", jarPath,
+		"--url", "http://localhost:9090/admin/dashboard",
+		"--expect-cookie", "admin_session",
+	}, strings.NewReader(""), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("expected auth inspect JSON to succeed, stderr:\n%s", stderr.String())
+	}
+	var result pkgwebcap.AuthInspectResult
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("stdout is not auth JSON: %v\n%s", err, stdout.String())
+	}
+	if result.Command != "auth inspect" || len(result.ExpectedCookies) != 1 || result.ExpectedCookies[0].Status != "present" {
+		t.Fatalf("unexpected auth inspect result: %#v", result)
+	}
+	if strings.Contains(stdout.String(), "secret-value") {
+		t.Fatalf("auth inspect JSON leaked cookie value:\n%s", stdout.String())
+	}
+}
+
+func TestRunAuthLoginCLIWithCustomScript(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	dir := t.TempDir()
+	jarPath := filepath.Join(dir, "cookies.txt")
+	scriptPath := filepath.Join(dir, "login.sh")
+	script := `#!/usr/bin/env bash
+cat > "$WEBCAP_COOKIE_JAR" <<COOKIEJAR
+# Netscape HTTP Cookie File
+localhost	FALSE	/admin	FALSE	1893456000	admin_session	cli-cookie-secret
+COOKIEJAR
+echo "password=$WEBCAP_PASSWORD"
+`
+	if err := os.WriteFile(scriptPath, []byte(script), 0o700); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+	t.Setenv("ADMIN_PASSWORD", "cli-password-secret")
+
+	var stdout, stderr bytes.Buffer
+	code := runCLI(context.Background(), []string{
+		"auth", "login",
+		"--json",
+		"--script", scriptPath,
+		"--base-url", "http://localhost:9090",
+		"--target-url", "http://localhost:9090/admin/dashboard",
+		"--cookie-jar", jarPath,
+		"--identifier", "admin",
+		"--password-env", "ADMIN_PASSWORD",
+		"--expect-cookie", "admin_session",
+	}, strings.NewReader(""), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("expected auth login to succeed, stderr:\n%s", stderr.String())
+	}
+	var result pkgwebcap.AuthLoginResult
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("stdout is not auth login JSON: %v\n%s", err, stdout.String())
+	}
+	if result.Script.Mode != "custom" || len(result.Inspection.ExpectedCookies) != 1 || result.Inspection.ExpectedCookies[0].Status != "present" {
+		t.Fatalf("unexpected auth login result: %#v", result)
+	}
+	for _, secret := range []string{"cli-password-secret", "cli-cookie-secret"} {
+		if strings.Contains(stdout.String(), secret) {
+			t.Fatalf("auth login JSON leaked %q:\n%s", secret, stdout.String())
+		}
+	}
+}
+
+func TestRunAuthLoginCLIErrorRedactsScriptOutput(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	dir := t.TempDir()
+	scriptPath := filepath.Join(dir, "login.sh")
+	if err := os.WriteFile(scriptPath, []byte("#!/usr/bin/env bash\necho \"password=$WEBCAP_PASSWORD\" >&2\nexit 4\n"), 0o700); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+	t.Setenv("ADMIN_PASSWORD", "cli-password-secret")
+
+	var stdout, stderr bytes.Buffer
+	code := runCLI(context.Background(), []string{
+		"auth", "login",
+		"--json",
+		"--script", scriptPath,
+		"--base-url", "http://localhost:9090",
+		"--cookie-jar", filepath.Join(dir, "cookies.txt"),
+		"--identifier", "admin",
+		"--password-env", "ADMIN_PASSWORD",
+		"--expect-cookie", "admin_session",
+	}, strings.NewReader(""), &stdout, &stderr)
+	if code == 0 {
+		t.Fatal("expected auth login failure")
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("expected no stdout, got:\n%s", stdout.String())
+	}
+	if strings.Contains(stderr.String(), "cli-password-secret") {
+		t.Fatalf("auth login error leaked password:\n%s", stderr.String())
+	}
+	var envelope struct {
+		Code      string         `json:"code"`
+		Operation string         `json:"operation"`
+		Metadata  map[string]any `json:"metadata"`
+	}
+	if err := json.Unmarshal(stderr.Bytes(), &envelope); err != nil {
+		t.Fatalf("stderr is not JSON: %v\n%s", err, stderr.String())
+	}
+	if envelope.Code != string(pkgwebcap.CodeValidation) || envelope.Operation != "auth_login" {
+		t.Fatalf("unexpected error envelope: %#v", envelope)
 	}
 }
 
@@ -739,6 +891,17 @@ func writeMainTestPNG(t *testing.T, path string, c color.NRGBA) {
 	}
 	if err := file.Close(); err != nil {
 		t.Fatalf("close image: %v", err)
+	}
+}
+
+func writeMainTestCookieJar(t *testing.T, path string, lines []string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("create cookie jar dir: %v", err)
+	}
+	payload := "# Netscape HTTP Cookie File\n" + strings.Join(lines, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
+		t.Fatalf("write cookie jar: %v", err)
 	}
 }
 

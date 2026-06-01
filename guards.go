@@ -17,22 +17,6 @@ func verifyURLGuards(guards CaptureGuards, finalURL string) error {
 func evaluateURLGuardOutcomes(guards CaptureGuards, finalURL string) ([]GuardOutcome, error) {
 	finalURL = strings.TrimSpace(finalURL)
 	var outcomes []GuardOutcome
-	if guards.ExpectURL != "" {
-		matched := strings.Contains(finalURL, guards.ExpectURL)
-		outcomes = append(outcomes, GuardOutcome{
-			Kind:     "expect_url",
-			Value:    guards.ExpectURL,
-			FinalURL: finalURL,
-			Matched:  matched,
-			Status:   guardOutcomeStatus(matched),
-		})
-		if !matched {
-			return outcomes, newCaptureError(CodeCapture, "verify_url_guard", "final URL did not contain expected substring", nil).
-				WithMetadata("guard", "expect_url").
-				WithMetadata("expect_url", guards.ExpectURL).
-				WithMetadata("final_url", finalURL)
-		}
-	}
 	for _, forbidden := range guards.FailOnURL {
 		matched := strings.Contains(finalURL, forbidden)
 		passed := !matched
@@ -47,6 +31,22 @@ func evaluateURLGuardOutcomes(guards CaptureGuards, finalURL string) ([]GuardOut
 			return outcomes, newCaptureError(CodeCapture, "verify_url_guard", "final URL matched forbidden substring", nil).
 				WithMetadata("guard", "fail_on_url").
 				WithMetadata("fail_on_url", forbidden).
+				WithMetadata("final_url", finalURL)
+		}
+	}
+	if guards.ExpectURL != "" {
+		matched := strings.Contains(finalURL, guards.ExpectURL)
+		outcomes = append(outcomes, GuardOutcome{
+			Kind:     "expect_url",
+			Value:    guards.ExpectURL,
+			FinalURL: finalURL,
+			Matched:  matched,
+			Status:   guardOutcomeStatus(matched),
+		})
+		if !matched {
+			return outcomes, newCaptureError(CodeCapture, "verify_url_guard", "final URL did not contain expected substring", nil).
+				WithMetadata("guard", "expect_url").
+				WithMetadata("expect_url", guards.ExpectURL).
 				WithMetadata("final_url", finalURL)
 		}
 	}

@@ -108,7 +108,7 @@ type CaptureCookie struct {
 	HTTPOnly bool   `json:"httpOnly,omitempty" yaml:"httpOnly,omitempty"`
 	SameSite string `json:"sameSite,omitempty" yaml:"sameSite,omitempty"`
 	Expires  int64  `json:"expires,omitempty" yaml:"expires,omitempty"`
-	HostOnly bool   `json:"-" yaml:"-"`
+	HostOnly bool   `json:"host_only,omitempty" yaml:"host_only,omitempty"`
 }
 
 type CaptureGuards struct {

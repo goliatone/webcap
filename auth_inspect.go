@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"time"
 )
@@ -226,10 +227,8 @@ func expectedCookieStatuses(expected []string, cookies []AuthCookieDiagnostic) [
 
 func appendReason(reasons []string, reason string) []string {
 	out := append([]string(nil), reasons...)
-	for _, existing := range out {
-		if existing == reason {
-			return out
-		}
+	if slices.Contains(out, reason) {
+		return out
 	}
 	return append(out, reason)
 }

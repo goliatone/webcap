@@ -59,7 +59,8 @@ func InspectAuthState(req AuthInspectRequest, now time.Time) (AuthInspectResult,
 		return result, newCaptureError(CodeValidation, "auth_inspect", "auth state did not satisfy expected cookie checks", nil).
 			WithMetadata("source", result.Source).
 			WithMetadata("target_url", result.TargetURL).
-			WithMetadata("expected_cookies", result.ExpectedCookies)
+			WithMetadata("expected_cookies", result.ExpectedCookies).
+			WithMetadata("warnings", result.Warnings)
 	}
 	return result, nil
 }

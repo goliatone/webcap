@@ -87,6 +87,32 @@ func TestLoginAuthStateEmbeddedScriptAgainstCSRFServer(t *testing.T) {
 	assertNoSecretLeak(t, result, "correct-password")
 }
 
+func TestLoginAuthStateEmbeddedScriptAllowsFinalURLContainingLoginPath(t *testing.T) {
+	requireBash(t)
+	requireCurl(t)
+	now := time.Unix(1700000000, 0)
+	server := newAuthLoginHistoryServer(t)
+	jarPath := filepath.Join(t.TempDir(), "cookies.txt")
+	t.Setenv("ADMIN_PASSWORD", "correct-password")
+
+	result, err := LoginAuthState(context.Background(), AuthLoginRequest{
+		BaseURL:       server.URL,
+		TargetURL:     server.URL + "/admin/login-history",
+		CookieJar:     jarPath,
+		Identifier:    "admin",
+		PasswordEnv:   "ADMIN_PASSWORD",
+		ExpectCookies: []string{"admin_session"},
+		LoginPath:     DefaultAuthLoginPath,
+		Timeout:       "10s",
+	}, now)
+	if err != nil {
+		t.Fatalf("LoginAuthState returned error: %v; stderr=%q", err, result.Script.Stderr)
+	}
+	if len(result.Inspection.ExpectedCookies) != 1 || result.Inspection.ExpectedCookies[0].Status != authCookieStatusPresent {
+		t.Fatalf("expected validated cookie: %#v", result.Inspection.ExpectedCookies)
+	}
+}
+
 func TestAuthHelperWorkflowLoginInspectAndCaptureProtectedRoute(t *testing.T) {
 	requireBash(t)
 	requireCurl(t)
@@ -340,6 +366,50 @@ func TestLoginAuthStateTimeout(t *testing.T) {
 	}
 }
 
+func TestLoginAuthStateCancellation(t *testing.T) {
+	requireBash(t)
+	dir := t.TempDir()
+	scriptPath := filepath.Join(dir, "slow.sh")
+	if err := os.WriteFile(scriptPath, []byte("#!/usr/bin/env bash\nsleep 2\n"), 0o700); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+	t.Setenv("ADMIN_PASSWORD", "super-secret")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	result, err := LoginAuthState(ctx, AuthLoginRequest{
+		ScriptPath:    scriptPath,
+		BaseURL:       "http://localhost:9090",
+		CookieJar:     filepath.Join(dir, "cookies.txt"),
+		Identifier:    "admin",
+		PasswordEnv:   "ADMIN_PASSWORD",
+		ExpectCookies: []string{"admin_session"},
+	}, time.Now())
+	if err == nil || !result.Script.Cancelled {
+		t.Fatalf("expected cancellation, got result=%#v err=%v", result, err)
+	}
+	assertNoSecretLeak(t, result, "super-secret")
+}
+
+func TestLoginAuthStateEmbeddedScriptNetworkFailure(t *testing.T) {
+	requireBash(t)
+	requireCurl(t)
+	t.Setenv("ADMIN_PASSWORD", "super-secret")
+
+	result, err := LoginAuthState(context.Background(), AuthLoginRequest{
+		BaseURL:       "http://127.0.0.1:1",
+		CookieJar:     filepath.Join(t.TempDir(), "cookies.txt"),
+		Identifier:    "admin",
+		PasswordEnv:   "ADMIN_PASSWORD",
+		ExpectCookies: []string{"admin_session"},
+		Timeout:       "5s",
+	}, time.Now())
+	if err == nil || result.Script.ExitCode == 0 {
+		t.Fatalf("expected curl/network failure, got result=%#v err=%v", result, err)
+	}
+	assertNoSecretLeak(t, result, "super-secret")
+}
+
 func newAuthLoginTestServer(t *testing.T, csrfMode string) *httptest.Server {
 	t.Helper()
 	const csrfToken = "csrf-test-token"
@@ -378,6 +448,42 @@ func newAuthLoginTestServer(t *testing.T, csrfMode string) *httptest.Server {
 	return httptest.NewServer(mux)
 }
 
+func newAuthLoginHistoryServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	const csrfToken = "csrf-test-token"
+	mux := http.NewServeMux()
+	mux.HandleFunc("/admin/login", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			w.Header().Set("X-CSRF-Token", csrfToken)
+			_, _ = w.Write([]byte(`<form method="post"></form>`))
+		case http.MethodPost:
+			if err := r.ParseForm(); err != nil {
+				t.Errorf("parse form: %v", err)
+				http.Error(w, "bad request", http.StatusBadRequest)
+				return
+			}
+			if r.Form.Get("identifier") != "admin" || r.Form.Get("password") != "correct-password" || r.Form.Get("_token") != csrfToken {
+				http.Redirect(w, r, "/admin/login", http.StatusFound)
+				return
+			}
+			http.SetCookie(w, &http.Cookie{Name: "admin_session", Value: "server-cookie-secret", Path: "/admin", Expires: time.Unix(1893456000, 0)})
+			http.Redirect(w, r, "/admin/login-history", http.StatusFound)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/admin/login-history", func(w http.ResponseWriter, r *http.Request) {
+		cookie, err := r.Cookie("admin_session")
+		if err != nil || cookie.Value == "" {
+			http.Redirect(w, r, "/admin/login", http.StatusFound)
+			return
+		}
+		_, _ = w.Write([]byte("history"))
+	})
+	return httptest.NewServer(mux)
+}
+
 func requireBash(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("bash"); err != nil {
@@ -396,11 +502,14 @@ func TestRedactAuthSecrets(t *testing.T) {
 	input := strings.Join([]string{
 		"password=super-secret",
 		"Authorization: Bearer raw-token",
+		"Authorization Bearer space-token",
 		"Set-Cookie: admin_session=cookie-secret",
 		"csrf=csrf-secret",
+		`{"access_token":"json-token","refresh_token":"refresh-secret"}`,
+		"token whitespace-token",
 	}, "\n")
 	redacted := RedactAuthSecrets(input, "super-secret", "cookie-secret")
-	for _, secret := range []string{"super-secret", "cookie-secret", "raw-token", "csrf-secret"} {
+	for _, secret := range []string{"super-secret", "cookie-secret", "raw-token", "space-token", "csrf-secret", "json-token", "refresh-secret", "whitespace-token"} {
 		if strings.Contains(redacted, secret) {
 			t.Fatalf("secret %q leaked in %s", secret, redacted)
 		}

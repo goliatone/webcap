@@ -217,7 +217,13 @@ func collectCookieSecrets(path string, now time.Time) []string {
 	return values
 }
 
-var sensitiveOutputPattern = regexp.MustCompile(`(?i)(authorization|cookie|set-cookie|x-csrf-token|_token|csrf|token|secret|password)([[:space:]]*[:=][^\r\n]*)`)
+const sensitiveOutputKeys = `authorization|cookie|set-cookie|x-csrf-token|_token|csrf|token|secret|password|access_token|refresh_token|id_token`
+
+var (
+	sensitiveJSONPattern   = regexp.MustCompile(`(?i)(["']?(?:` + sensitiveOutputKeys + `)["']?[[:space:]]*:[[:space:]]*)(["'][^"'\r\n]*["']|[^,}\]\r\n[:space:]]+)`)
+	sensitiveKeyValPattern = regexp.MustCompile(`(?im)^([[:space:]]*(?:` + sensitiveOutputKeys + `)[[:space:]]*[:=][[:space:]]*)([^\r\n]*)`)
+	sensitiveSpacePattern  = regexp.MustCompile(`(?im)^([[:space:]]*(?:authorization|cookie|set-cookie|x-csrf-token|token|secret|password|access_token|refresh_token|id_token)[[:space:]]+)([^\r\n]+)`)
+)
 
 func RedactAuthSecrets(text string, secrets ...string) string {
 	redacted := text
@@ -226,7 +232,9 @@ func RedactAuthSecrets(text string, secrets ...string) string {
 			redacted = strings.ReplaceAll(redacted, secret, "[REDACTED]")
 		}
 	}
-	redacted = sensitiveOutputPattern.ReplaceAllString(redacted, "$1=[REDACTED]")
+	redacted = sensitiveJSONPattern.ReplaceAllString(redacted, `${1}"[REDACTED]"`)
+	redacted = sensitiveKeyValPattern.ReplaceAllString(redacted, "${1}[REDACTED]")
+	redacted = sensitiveSpacePattern.ReplaceAllString(redacted, "${1}[REDACTED]")
 	return redacted
 }
 

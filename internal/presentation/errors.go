@@ -77,8 +77,99 @@ func writeHumanError(w io.Writer, err error) error {
 	if errors.As(err, &partialErr) {
 		return writePartialCaptureError(w, err, partialErr)
 	}
-	_, writeErr := fmt.Fprintf(w, "Error: %s\n", strings.TrimSpace(fmt.Sprint(err)))
-	return writeErr
+	if _, writeErr := fmt.Fprintf(w, "Error: %s\n", strings.TrimSpace(fmt.Sprint(err))); writeErr != nil {
+		return writeErr
+	}
+	var captureErr *pkgwebcap.Error
+	if errors.As(err, &captureErr) && isAuthOperation(captureErr.Operation) {
+		return writeAuthErrorDetails(w, captureErr)
+	}
+	return nil
+}
+
+func isAuthOperation(operation string) bool {
+	switch strings.TrimSpace(operation) {
+	case "auth_inspect", "auth_login":
+		return true
+	default:
+		return false
+	}
+}
+
+func writeAuthErrorDetails(w io.Writer, captureErr *pkgwebcap.Error) error {
+	if captureErr == nil || len(captureErr.Metadata) == 0 {
+		return nil
+	}
+	if script, ok := captureErr.Metadata["script"].(pkgwebcap.AuthScriptResult); ok {
+		if err := writeAuthScriptDiagnostics(w, script); err != nil {
+			return err
+		}
+	}
+	if inspection, ok := captureErr.Metadata["inspection"].(pkgwebcap.AuthInspectResult); ok {
+		if err := writeAuthExpectedCookies(w, inspection.ExpectedCookies); err != nil {
+			return err
+		}
+		if err := writeAuthWarnings(w, inspection.Warnings); err != nil {
+			return err
+		}
+	}
+	if statuses, ok := captureErr.Metadata["expected_cookies"].([]pkgwebcap.AuthExpectedCookieStatus); ok {
+		if err := writeAuthExpectedCookies(w, statuses); err != nil {
+			return err
+		}
+	}
+	if warnings, ok := captureErr.Metadata["warnings"].([]pkgwebcap.AuthDiagnosticWarning); ok {
+		if err := writeAuthWarnings(w, warnings); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeAuthScriptDiagnostics(w io.Writer, script pkgwebcap.AuthScriptResult) error {
+	if script.Mode != "" {
+		if _, err := fmt.Fprintf(w, "Script: %s", script.Mode); err != nil {
+			return err
+		}
+		if script.ExitCode != 0 {
+			if _, err := fmt.Fprintf(w, " exit=%d", script.ExitCode); err != nil {
+				return err
+			}
+		}
+		if script.TimedOut {
+			if _, err := fmt.Fprint(w, " timed_out=true"); err != nil {
+				return err
+			}
+		}
+		if script.Cancelled {
+			if _, err := fmt.Fprint(w, " cancelled=true"); err != nil {
+				return err
+			}
+		}
+		if _, err := fmt.Fprintln(w); err != nil {
+			return err
+		}
+	}
+	if err := writeAuthDiagnosticBlock(w, "Script stderr", script.Stderr); err != nil {
+		return err
+	}
+	return writeAuthDiagnosticBlock(w, "Script stdout", script.Stdout)
+}
+
+func writeAuthDiagnosticBlock(w io.Writer, label, text string) error {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil
+	}
+	if _, err := fmt.Fprintf(w, "%s:\n", label); err != nil {
+		return err
+	}
+	for _, line := range strings.Split(text, "\n") {
+		if _, err := fmt.Fprintf(w, "  %s\n", strings.TrimRight(line, "\r")); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func writePartialCaptureError(w io.Writer, err error, partialErr *pkgwebcap.PartialCaptureError) error {

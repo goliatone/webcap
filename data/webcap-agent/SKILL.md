@@ -25,7 +25,9 @@ Plain `webcap shot <url>` captures the full page by default. Add `--visible` whe
 
 For very tall full-page or selector targets, keep the default fail-fast behavior unless tile artifacts are acceptable. Use `--oversize tile` with explicit tile limits, and add `--tile-stitch` only when downstream comparison needs a single image.
 
-For auth-guarded pages, acquire auth outside `webcap` and pass it into the capture. Prefer `cookie_jar`, Playwright `storage_state`, explicit `cookies`, or safe local-only `headers` plus `expect_url` and `fail_on_url`/`fail_on_selector` guards. Do not add fixed waits to hide login redirects; guards should fail the capture when the browser lands on an auth fallback.
+For auth-guarded pages, use `webcap auth login` and `webcap auth inspect` for local go-admin style form login when possible, then pass the cookie jar into `webcap shot`. Otherwise acquire auth outside `webcap` and pass it into the capture. Prefer `cookie_jar`, Playwright `storage_state`, explicit `cookies`, or safe local-only `headers` plus `expect_url` and `fail_on_url`/`fail_on_selector` guards. Do not add fixed waits to hide login redirects; guards should fail the capture when the browser lands on an auth fallback.
+
+When using `webcap auth login`, pass passwords through `--password-env`, set the app-specific `--expect-cookie` (`admin_session` for Garchen-style local admin, `admin_user` for some go-admin examples), and treat `admin_debug_session` as debug-only, not authenticated state. Custom scripts receive `WEBCAP_*` variables and write `WEBCAP_COOKIE_JAR`; their stdout/stderr are diagnostics and are redacted before output.
 
 Treat cookie values, authorization headers, and storage-state contents as secrets. `webcap` redacts them from metadata and structured output, but command lines can still be visible in shell history; prefer files or environment expansion for sensitive values.
 

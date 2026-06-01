@@ -71,22 +71,52 @@ Unstitched tiled captures write deterministic tile files and metadata. Add `--ti
 
 ## Auth-guarded capture
 
-Acquire auth state outside `webcap`, then pass it into the capture and add guards for wrong-page detection.
+Use `webcap auth login` for local form-login helpers, or acquire auth state outside `webcap`, then pass it into the capture and add guards for wrong-page detection.
 
 ```bash
-curl -c /tmp/admin-cookies.txt \
-  -d identifier=admin@example.test \
-  -d password="$ADMIN_PASSWORD" \
-  http://localhost:9090/admin/login
+BASE_URL=http://localhost:9090
+TARGET_URL="$BASE_URL/admin/translations/queue"
+COOKIE_JAR=/tmp/admin-cookies.txt
+export ADMIN_PASSWORD='<local-dev-password>'
+
+webcap auth login \
+  --base-url "$BASE_URL" \
+  --target-url "$TARGET_URL" \
+  --cookie-jar "$COOKIE_JAR" \
+  --identifier admin@example.test \
+  --password-env ADMIN_PASSWORD \
+  --expect-cookie admin_session
+
+webcap auth inspect \
+  --cookie-jar "$COOKIE_JAR" \
+  --url "$TARGET_URL" \
+  --expect-cookie admin_session
 
 webcap shot \
-  --cookie-jar /tmp/admin-cookies.txt \
+  --cookie-jar "$COOKIE_JAR" \
   --expect-url /admin/translations/queue \
   --fail-on-url /admin/login \
   --fail-on-selector 'form[action*="/login"]' \
   --output artifacts/current/translations-queue.png \
-  http://localhost:9090/admin/translations/queue
+  "$TARGET_URL"
 ```
+
+The embedded helper supports go-admin style CSRF login by reading `X-CSRF-Token` or a hidden `_token` input. Use the app-specific expected cookie: Garchen-style local admin apps commonly use `admin_session`; other go-admin examples may use `admin_user`. `admin_debug_session` is only a debug cookie.
+
+Custom scripts use the same contract and write `WEBCAP_COOKIE_JAR`:
+
+```bash
+webcap auth login \
+  --script ./custom-login.sh \
+  --base-url "$BASE_URL" \
+  --target-url "$TARGET_URL" \
+  --cookie-jar "$COOKIE_JAR" \
+  --identifier admin@example.test \
+  --password-env ADMIN_PASSWORD \
+  --expect-cookie admin_session
+```
+
+Custom scripts receive `WEBCAP_BASE_URL`, `WEBCAP_LOGIN_PATH`, `WEBCAP_COOKIE_JAR`, `WEBCAP_IDENTIFIER`, `WEBCAP_PASSWORD`, `WEBCAP_EXPECT_COOKIE`, and optional `WEBCAP_TARGET_URL`. Script stdout and stderr are diagnostic output and are redacted before presentation.
 
 For local-only header auth:
 

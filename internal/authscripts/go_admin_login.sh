@@ -49,11 +49,27 @@ final_url="$(
     "$login_url"
 )"
 
-case "$final_url" in
-  *"$WEBCAP_LOGIN_PATH"*)
-    echo "login ended on login route; credentials or CSRF token may be invalid" >&2
-    exit 3
-    ;;
-esac
+final_path="$final_url"
+if [ "${final_url#*://}" != "$final_url" ]; then
+  final_without_scheme="${final_url#*://}"
+  if [ "${final_without_scheme#*/}" = "$final_without_scheme" ]; then
+    final_path="/"
+  else
+    final_path="/${final_without_scheme#*/}"
+  fi
+fi
+final_path="${final_path%%\?*}"
+final_path="${final_path%%#*}"
+login_path="$WEBCAP_LOGIN_PATH"
+if [ "$final_path" != "/" ]; then
+  final_path="${final_path%/}"
+fi
+if [ "$login_path" != "/" ]; then
+  login_path="${login_path%/}"
+fi
+if [ "$final_path" = "$login_path" ]; then
+  echo "login ended on login route; credentials or CSRF token may be invalid" >&2
+  exit 3
+fi
 
 echo "login request completed"

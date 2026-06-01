@@ -24,6 +24,10 @@ func (p Presenter) presentHuman(w io.Writer, value any) error {
 		return writeDiff(w, result)
 	case pkgwebcap.SemanticDiffResult:
 		return writeSemanticDiff(w, result)
+	case pkgwebcap.AuthInspectResult:
+		return writeAuthInspect(w, result)
+	case pkgwebcap.AuthLoginResult:
+		return writeAuthLogin(w, result)
 	case pkgwebcap.WorkflowCaptureResult:
 		return writeWorkflowCapture(w, result)
 	case pkgwebcap.WorkflowReportResult:

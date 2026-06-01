@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"time"
 
 	pkgwebcap "github.com/goliatone/webcap"
 	commandwebcap "github.com/goliatone/webcap/commands/webcap"
@@ -102,6 +103,7 @@ func (a app) run(ctx context.Context, invocation cliInvocation) error {
 		"workflow":      a.runWorkflow,
 		"report":        a.runReport,
 		"skill":         runSkill,
+		"auth":          a.runAuth,
 	}
 	handler, ok := handlers[invocation.Command]
 	if !ok {
@@ -112,6 +114,17 @@ func (a app) run(ctx context.Context, invocation cliInvocation) error {
 		return err
 	}
 	return presenter(invocation.Output).Present(a.stdout, result)
+}
+
+func (a app) runAuth(ctx context.Context, invocation cliInvocation) (any, error) {
+	switch invocation.Auth.Action {
+	case "inspect":
+		return pkgwebcap.InspectAuthState(invocation.Auth.Inspect, time.Now())
+	case "login":
+		return pkgwebcap.LoginAuthState(ctx, invocation.Auth.Login, time.Now())
+	default:
+		return nil, fmt.Errorf("unsupported auth action %q", invocation.Auth.Action)
+	}
 }
 
 func runSkill(ctx context.Context, invocation cliInvocation) (any, error) {
@@ -396,6 +409,8 @@ Usage:
   webcap multi [flags] <manifest-path>
   webcap diff [flags] <base-path> <compare-path>
   webcap semantic-diff [flags] <current-image> <reference-image>
+  webcap auth inspect [flags]
+  webcap auth login [flags]
   webcap workflow capture-scenario [flags] <scenario-path>
   webcap report scenario [flags] <scenario-path>
   webcap mcp serve [flags]
@@ -408,6 +423,8 @@ Commands:
   multi                        Run a YAML or JSON capture manifest.
   diff                         Compare two image artifacts.
   semantic-diff                Compare two image artifacts with a vision LLM provider.
+  auth inspect                 Inspect auth cookie jars or Playwright storage-state files.
+  auth login                   Run a script login helper and validate the resulting cookie jar.
   workflow capture-scenario    Capture every screen in a workflow scenario.
   report scenario              Generate a workflow HTML review report.
   mcp serve                    Start the stdio MCP server.
@@ -442,6 +459,23 @@ Readiness flags for shot:
   --wait-for-function          Wait for a JavaScript predicate to become truthy before capture.
   --wait                       Extra wait duration after readiness, such as 250ms or 2s.
   --wait-for-fonts             Wait for document fonts to finish loading before capture.
+
+Auth helper flags:
+  auth inspect --cookie-jar     Netscape/curl cookie jar to inspect.
+  auth inspect --storage-state  Playwright storage-state JSON file to inspect.
+  auth inspect --url            Target URL used for cookie applicability checks.
+  auth inspect --expect-cookie  Expected auth cookie name; repeat for multiple values.
+  auth inspect --warn-debug-cookie
+                               Debug-only cookie name to warn about; repeat for multiple values.
+  auth login --base-url         Base application URL.
+  auth login --login-path       Login path relative to --base-url.
+  auth login --target-url       Protected target URL used for post-login validation.
+  auth login --cookie-jar       Cookie jar path written by the login script.
+  auth login --identifier       Login identifier passed to the script.
+  auth login --password-env     Environment variable containing the login password.
+  auth login --expect-cookie    Expected auth cookie name; repeat for multiple values.
+  auth login --script           Optional custom bash login script.
+  auth login --timeout          Login script timeout such as 30s.
 
 Semantic provider flags:
   --openai-base-url            Override the OpenAI semantic provider endpoint.

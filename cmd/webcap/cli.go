@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	pkgwebcap "github.com/goliatone/webcap"
 	"github.com/goliatone/webcap/pkg/agents/skills"
@@ -23,6 +24,7 @@ type cliInvocation struct {
 	Report   reportOptions
 	MCP      mcpOptions
 	Skill    skillOptions
+	Auth     authOptions
 	Browser  browserOptions
 	Provider semanticProviderOptions
 }
@@ -106,9 +108,15 @@ type skillOptions struct {
 	Force  bool
 }
 
+type authOptions struct {
+	Action  string
+	Inspect pkgwebcap.AuthInspectRequest
+	Login   pkgwebcap.AuthLoginRequest
+}
+
 func parseCLI(args []string) (cliInvocation, error) {
 	if len(args) == 0 {
-		return cliInvocation{}, errors.New("expected subcommand: help, version, shot, multi, diff, semantic-diff, workflow, report, mcp, or skill")
+		return cliInvocation{}, errors.New("expected subcommand: help, version, shot, multi, diff, semantic-diff, workflow, report, mcp, skill, or auth")
 	}
 
 	switch strings.TrimSpace(args[0]) {
@@ -132,9 +140,148 @@ func parseCLI(args []string) (cliInvocation, error) {
 		return parseMCPCLI(args[1:])
 	case "skill":
 		return parseSkillCLI(args[1:])
+	case "auth":
+		return parseAuthCLI(args[1:])
 	default:
 		return cliInvocation{}, fmt.Errorf("unsupported subcommand %q", args[0])
 	}
+}
+
+func parseAuthCLI(args []string) (cliInvocation, error) {
+	if len(args) == 0 {
+		return cliInvocation{}, errors.New("auth requires a nested subcommand such as inspect or login")
+	}
+	switch strings.TrimSpace(args[0]) {
+	case "inspect":
+		return parseAuthInspectCLI(args[1:])
+	case "login":
+		return parseAuthLoginCLI(args[1:])
+	default:
+		return cliInvocation{}, fmt.Errorf("unsupported auth subcommand %q", args[0])
+	}
+}
+
+func parseAuthInspectCLI(args []string) (cliInvocation, error) {
+	var (
+		stderr           bytes.Buffer
+		expectCookies    stringSliceFlag
+		warnDebugCookies stringSliceFlag
+	)
+
+	invocation := cliInvocation{
+		Command: "auth",
+		Output:  defaultOutputOptions(),
+		Auth: authOptions{
+			Action: "inspect",
+			Inspect: pkgwebcap.AuthInspectRequest{
+				WarnDebugCookies: append([]string(nil), pkgwebcap.DefaultDebugCookieNames...),
+			},
+		},
+	}
+	fs := flag.NewFlagSet("webcap auth inspect", flag.ContinueOnError)
+	fs.SetOutput(&stderr)
+	registerOutputFlags(fs, &invocation.Output)
+	fs.StringVar(&invocation.Auth.Inspect.CookieJar, "cookie-jar", "", "Netscape/curl cookie jar to inspect.")
+	fs.StringVar(&invocation.Auth.Inspect.StorageState, "storage-state", "", "Playwright storage-state JSON file to inspect.")
+	fs.StringVar(&invocation.Auth.Inspect.TargetURL, "url", "", "Target URL used for cookie applicability checks.")
+	fs.Var(&expectCookies, "expect-cookie", "Expected auth cookie name; repeat for multiple values.")
+	fs.Var(&warnDebugCookies, "warn-debug-cookie", "Debug-only cookie name to warn about; repeat for multiple values.")
+	if err := fs.Parse(args); err != nil {
+		return cliInvocation{}, parseError(err, stderr.String(), invocation.Output)
+	}
+	if err := normalizeOutputOptions(&invocation.Output); err != nil {
+		return cliInvocation{}, cliParseError{Message: err.Error(), Output: invocation.Output}
+	}
+	if len(fs.Args()) != 0 {
+		return cliInvocation{}, cliParseError{Message: "auth inspect does not accept positional arguments", Output: invocation.Output}
+	}
+	if strings.TrimSpace(invocation.Auth.Inspect.CookieJar) == "" && strings.TrimSpace(invocation.Auth.Inspect.StorageState) == "" {
+		return cliInvocation{}, cliParseError{Message: "auth inspect requires --cookie-jar or --storage-state", Output: invocation.Output}
+	}
+	if strings.TrimSpace(invocation.Auth.Inspect.CookieJar) != "" && strings.TrimSpace(invocation.Auth.Inspect.StorageState) != "" {
+		return cliInvocation{}, cliParseError{Message: "auth inspect accepts only one of --cookie-jar or --storage-state", Output: invocation.Output}
+	}
+	invocation.Auth.Inspect.CookieJar = strings.TrimSpace(invocation.Auth.Inspect.CookieJar)
+	invocation.Auth.Inspect.StorageState = strings.TrimSpace(invocation.Auth.Inspect.StorageState)
+	invocation.Auth.Inspect.TargetURL = strings.TrimSpace(invocation.Auth.Inspect.TargetURL)
+	invocation.Auth.Inspect.ExpectCookies = normalizeFlagStrings(expectCookies)
+	if flagVisited(fs, "warn-debug-cookie") {
+		invocation.Auth.Inspect.WarnDebugCookies = normalizeFlagStrings(warnDebugCookies)
+	}
+	return invocation, nil
+}
+
+func parseAuthLoginCLI(args []string) (cliInvocation, error) {
+	var (
+		stderr        bytes.Buffer
+		expectCookies stringSliceFlag
+	)
+
+	invocation := cliInvocation{
+		Command: "auth",
+		Output:  defaultOutputOptions(),
+		Auth: authOptions{
+			Action: "login",
+			Login: pkgwebcap.AuthLoginRequest{
+				LoginPath: pkgwebcap.DefaultAuthLoginPath,
+			},
+		},
+	}
+	fs := flag.NewFlagSet("webcap auth login", flag.ContinueOnError)
+	fs.SetOutput(&stderr)
+	registerOutputFlags(fs, &invocation.Output)
+	fs.StringVar(&invocation.Auth.Login.ScriptPath, "script", "", "Optional custom bash login script.")
+	fs.StringVar(&invocation.Auth.Login.BaseURL, "base-url", "", "Base application URL.")
+	fs.StringVar(&invocation.Auth.Login.LoginPath, "login-path", invocation.Auth.Login.LoginPath, "Login path relative to --base-url.")
+	fs.StringVar(&invocation.Auth.Login.TargetURL, "target-url", "", "Protected target URL used for post-login applicability checks.")
+	fs.StringVar(&invocation.Auth.Login.CookieJar, "cookie-jar", "", "Cookie jar path the login script writes.")
+	fs.StringVar(&invocation.Auth.Login.Identifier, "identifier", "", "Login identifier passed to the script.")
+	fs.StringVar(&invocation.Auth.Login.PasswordEnv, "password-env", "", "Environment variable containing the login password.")
+	fs.Var(&expectCookies, "expect-cookie", "Expected auth cookie name; repeat for multiple values.")
+	fs.StringVar(&invocation.Auth.Login.Timeout, "timeout", "", "Login script timeout such as 30s.")
+	if err := fs.Parse(args); err != nil {
+		return cliInvocation{}, parseError(err, stderr.String(), invocation.Output)
+	}
+	if err := normalizeOutputOptions(&invocation.Output); err != nil {
+		return cliInvocation{}, cliParseError{Message: err.Error(), Output: invocation.Output}
+	}
+	if len(fs.Args()) != 0 {
+		return cliInvocation{}, cliParseError{Message: "auth login does not accept positional arguments", Output: invocation.Output}
+	}
+	trimAuthLogin(&invocation.Auth.Login)
+	invocation.Auth.Login.ExpectCookies = normalizeFlagStrings(expectCookies)
+	if invocation.Auth.Login.BaseURL == "" {
+		return cliInvocation{}, cliParseError{Message: "auth login requires --base-url", Output: invocation.Output}
+	}
+	if invocation.Auth.Login.CookieJar == "" {
+		return cliInvocation{}, cliParseError{Message: "auth login requires --cookie-jar", Output: invocation.Output}
+	}
+	if invocation.Auth.Login.Identifier == "" {
+		return cliInvocation{}, cliParseError{Message: "auth login requires --identifier", Output: invocation.Output}
+	}
+	if invocation.Auth.Login.PasswordEnv == "" {
+		return cliInvocation{}, cliParseError{Message: "auth login requires --password-env", Output: invocation.Output}
+	}
+	if len(invocation.Auth.Login.ExpectCookies) == 0 {
+		return cliInvocation{}, cliParseError{Message: "auth login requires at least one --expect-cookie", Output: invocation.Output}
+	}
+	if invocation.Auth.Login.Timeout != "" {
+		if _, err := time.ParseDuration(invocation.Auth.Login.Timeout); err != nil {
+			return cliInvocation{}, cliParseError{Message: "auth login --timeout must be a duration such as 30s", Output: invocation.Output}
+		}
+	}
+	return invocation, nil
+}
+
+func trimAuthLogin(login *pkgwebcap.AuthLoginRequest) {
+	login.ScriptPath = strings.TrimSpace(login.ScriptPath)
+	login.BaseURL = strings.TrimSpace(login.BaseURL)
+	login.LoginPath = strings.TrimSpace(login.LoginPath)
+	login.TargetURL = strings.TrimSpace(login.TargetURL)
+	login.CookieJar = strings.TrimSpace(login.CookieJar)
+	login.Identifier = strings.TrimSpace(login.Identifier)
+	login.PasswordEnv = strings.TrimSpace(login.PasswordEnv)
+	login.Timeout = strings.TrimSpace(login.Timeout)
 }
 
 func parseHelpCLI(args []string) (cliInvocation, error) {
@@ -739,6 +886,21 @@ func splitCSV(raw string) []string {
 			continue
 		}
 		out = append(out, part)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func normalizeFlagStrings(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		out = append(out, value)
 	}
 	if len(out) == 0 {
 		return nil

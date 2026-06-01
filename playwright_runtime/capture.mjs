@@ -1,4 +1,5 @@
 import { chromium, firefox, webkit } from "playwright";
+import { guardOutcome, verifyURLGuards } from "./guards.mjs";
 import { captureError, errorEnvelopeFrom, waitForUserFunction } from "./wait_for_function.mjs";
 
 const browserMap = { chromium, firefox, webkit };
@@ -439,37 +440,6 @@ function normalizeSameSite(value) {
   }
 }
 
-function verifyURLGuards(guards, finalURL) {
-  const url = String(finalURL || "");
-  const outcomes = [];
-  const expectURL = String(guards?.expect_url || "").trim();
-  if (expectURL) {
-    const matched = url.includes(expectURL);
-    outcomes.push(guardOutcome("expect_url", expectURL, url, matched, matched));
-    if (!matched) {
-      throw captureError("capture_error", "verify_url_guard", "final URL did not contain expected substring", {
-        guard: "expect_url",
-        expect_url: expectURL,
-        final_url: url,
-      });
-    }
-  }
-  for (const forbidden of Array.isArray(guards?.fail_on_url) ? guards.fail_on_url : []) {
-    const value = String(forbidden || "").trim();
-    if (!value) continue;
-    const matched = url.includes(value);
-    outcomes.push(guardOutcome("fail_on_url", value, url, matched, !matched));
-    if (matched) {
-      throw captureError("capture_error", "verify_url_guard", "final URL matched forbidden substring", {
-        guard: "fail_on_url",
-        fail_on_url: value,
-        final_url: url,
-      });
-    }
-  }
-  return outcomes;
-}
-
 async function verifySelectorGuards(page, guards, finalURL) {
   const selectors = Array.isArray(guards?.fail_on_selector)
     ? guards.fail_on_selector.map((value) => String(value || "").trim()).filter(Boolean)
@@ -498,14 +468,4 @@ async function verifySelectorGuards(page, guards, finalURL) {
   return selectors.map((selector) =>
     guardOutcome("fail_on_selector", selector, String(finalURL || ""), selector === matched, selector !== matched)
   );
-}
-
-function guardOutcome(kind, value, finalURL, matched, passed) {
-  return {
-    kind,
-    value,
-    final_url: finalURL,
-    matched,
-    status: passed ? "passed" : "failed",
-  };
 }

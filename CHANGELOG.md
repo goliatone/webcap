@@ -1,10 +1,26 @@
 # Changelog
 
+# [0.9.1](https://github.com/goliatone/webcap/compare/v0.9.0...v0.9.1) - (2026-06-01)
+
+## <!-- 1 -->🐛 Bug Fixes
+
+- Include warnings and additional info ([26d3a40](https://github.com/goliatone/webcap/commit/26d3a40279301d2ea39a2899f94e006221957edd))  - (goliatone)
+- Code quality ([53f290f](https://github.com/goliatone/webcap/commit/53f290fbf006f75c28a145f445aaca66673faa04))  - (goliatone)
+- Auth flow ([2e6376d](https://github.com/goliatone/webcap/commit/2e6376d9a26cdb517e9c362ac087d149d76c7e1b))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update tests ([d6ccc48](https://github.com/goliatone/webcap/commit/d6ccc48eae9d05d98e42710d682a236aa16d715d))  - (goliatone)
+
 # [0.9.0](https://github.com/goliatone/webcap/compare/v0.8.0...v0.9.0) - (2026-06-01)
 
 ## <!-- 1 -->🐛 Bug Fixes
 
 - Code quality ([feb0c97](https://github.com/goliatone/webcap/commit/feb0c97d53be205763bca856b15714874e98eb39))  - (goliatone)
+
+## <!-- 12 -->🔖 Releases
+
+- V0.9.0 ([84d5052](https://github.com/goliatone/webcap/commit/84d5052e842f383896bbc29fb7e8d7372812232d))  - (goliatone)
 
 ## <!-- 16 -->➕ Add
 

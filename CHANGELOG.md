@@ -1,11 +1,32 @@
 # Changelog
 
+# [0.9.0](https://github.com/goliatone/webcap/compare/v0.8.0...v0.9.0) - (2026-06-01)
+
+## <!-- 1 -->🐛 Bug Fixes
+
+- Code quality ([feb0c97](https://github.com/goliatone/webcap/commit/feb0c97d53be205763bca856b15714874e98eb39))  - (goliatone)
+
+## <!-- 16 -->➕ Add
+
+- Auth helpers and commands ([91c7e00](https://github.com/goliatone/webcap/commit/91c7e004edc4f5d05a31c9372b126986fbb15324))  - (goliatone)
+- Auth scripts ([6be8d06](https://github.com/goliatone/webcap/commit/6be8d06b3b2cac5a024daf67ff1568550a467db4))  - (goliatone)
+- Auth helpers ([992251d](https://github.com/goliatone/webcap/commit/992251d5e3e4b99ab3a6198da1885259d1eb82c3))  - (goliatone)
+
+## <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Update docs ([a600eb5](https://github.com/goliatone/webcap/commit/a600eb54e38e2835db3b3405629a11def2420a89))  - (goliatone)
+- Update tests ([c42a004](https://github.com/goliatone/webcap/commit/c42a004d529a988c3ce24788171515b8931d040c))  - (goliatone)
+
 # [0.8.0](https://github.com/goliatone/webcap/compare/v0.7.0...v0.8.0) - (2026-05-29)
 
 ## <!-- 1 -->🐛 Bug Fixes
 
 - Goreleaser setup ([3ab657d](https://github.com/goliatone/webcap/commit/3ab657de2dc5bd4dbb1340dcafd98313cb4140ac))  - (goliatone)
 - Code quality ([f9dfee6](https://github.com/goliatone/webcap/commit/f9dfee630b61c65842534d6fd0b6a38c3a8a60eb))  - (goliatone)
+
+## <!-- 12 -->🔖 Releases
+
+- V0.8.0 ([cb08e74](https://github.com/goliatone/webcap/commit/cb08e74703f980818b8a2ec259e57801209637f5))  - (goliatone)
 
 ## <!-- 7 -->⚙️ Miscellaneous Tasks
 

@@ -74,7 +74,7 @@ Cookie-authenticated local admin flow:
 BASE_URL=http://localhost:9090
 TARGET_URL="$BASE_URL/admin/translations/queue"
 COOKIE_JAR=/tmp/admin-cookies.txt
-export ADMIN_PASSWORD='<local-dev-password>'
+export ADMIN_PASSWORD='local-dev-password'
 
 webcap auth login \
   --base-url "$BASE_URL" \
